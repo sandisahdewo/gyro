@@ -225,7 +225,11 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig, onEv
 
       // Run on_complete checkpoints
       for (const cpName of prd.getOnCompleteCheckpoints()) {
-        runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile, onEvent);
+        try {
+          runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile, onEvent);
+        } catch (err) {
+          warn(`Checkpoint ${cpName} crashed: ${err instanceof Error ? err.message : err}`);
+        }
       }
 
       // Stop environment
@@ -284,13 +288,18 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig, onEv
 
     if (result.shipped) {
       // Commit
-      if (prd.useWorkBranches()) {
-        git.createStoryBranch(story.id);
+      try {
+        if (prd.useWorkBranches()) {
+          git.createStoryBranch(story.id);
+        }
+        const summary = state.getWorkSummary()?.split("\n")[0] ?? "";
+        git.gitAdd();
+        git.gitCommit(`feat(${story.id}): ${summary || "implementation complete"}`);
+        log(`  Committed on ${git.currentBranch()}`);
+      } catch (err) {
+        warn(`Git commit failed: ${err instanceof Error ? err.message : err}`);
+        warn("Continuing anyway...");
       }
-      const summary = state.getWorkSummary()?.split("\n")[0] ?? "";
-      git.gitAdd();
-      git.gitCommit(`feat(${story.id}): ${summary || "implementation complete"}`);
-      log(`  Committed on ${git.currentBranch()}`);
 
       ok(`${story.id} SHIPPED on attempt (${formatDuration(storyElapsed)})`);
       tracker.showStoryUsage();
@@ -315,7 +324,12 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig, onEv
       if (prd.hasCheckpoints()) {
         for (const cpName of prd.getCheckpointNames()) {
           if (prd.shouldRunCheckpointAfter(story.id, cpName)) {
-            runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile, onEvent);
+            try {
+              runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile, onEvent);
+            } catch (err) {
+              warn(`Checkpoint ${cpName} crashed: ${err instanceof Error ? err.message : err}`);
+              warn("Continuing to next story...");
+            }
           }
         }
       }

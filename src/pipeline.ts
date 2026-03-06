@@ -28,6 +28,54 @@ function parseClaudeUsage(logPath: string): TokenUsage | undefined {
   }
 }
 
+function parseCodexUsage(logPath: string): TokenUsage | undefined {
+  try {
+    const content = readFileSync(logPath, "utf-8");
+    const usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheRead: 0 };
+    let found = false;
+
+    for (const rawLine of content.split("\n")) {
+      const line = rawLine.trim();
+      if (!line.startsWith("{")) continue;
+
+      try {
+        const data = JSON.parse(line);
+        if (data.type !== "turn.completed" || !data.usage) continue;
+
+        usage.inputTokens += data.usage.input_tokens ?? 0;
+        usage.outputTokens += data.usage.output_tokens ?? 0;
+        usage.cacheRead += data.usage.cached_input_tokens ?? 0;
+        found = true;
+      } catch {
+        // Ignore non-JSONL lines in mixed output logs.
+      }
+    }
+
+    return found ? usage : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseUsage(agent: AgentType, logPath: string): TokenUsage | undefined {
+  switch (agent) {
+    case "claude":
+      return parseClaudeUsage(logPath);
+    case "codex":
+      return parseCodexUsage(logPath);
+    default:
+      return undefined;
+  }
+}
+
+function showStepUsage(stepName: string, usage: TokenUsage) {
+  const total = usage.inputTokens + usage.outputTokens;
+  log(
+    `  ${DIM}[${stepName}] ${formatTokens(usage.inputTokens)} in / ` +
+      `${formatTokens(usage.outputTokens)} out (${formatTokens(total)} total)${NC}`
+  );
+}
+
 export function runStep(
   stepName: string,
   prd: PrdFile,
@@ -37,7 +85,8 @@ export function runStep(
 ): StepOutcome {
   const promptFile = `.gyro/prompts/${stepName}.md`;
   if (!existsSync(promptFile)) {
-    throw new Error(`Prompt not found: ${promptFile}`);
+    warn(`  [${stepName}] Prompt not found: ${promptFile}`);
+    return { success: false };
   }
 
   const modelConfig = prd.getModelConfig(stepName);
@@ -56,25 +105,17 @@ export function runStep(
       shell: "/bin/bash",
     });
 
-    if (resolved.agent === "claude") {
-      const usage = parseClaudeUsage(stepLog);
-      if (usage) {
-        tracker.addUsage(usage);
-        const total = usage.inputTokens + usage.outputTokens;
-        log(
-          `  ${DIM}[${stepName}] ${formatTokens(usage.inputTokens)} in / ` +
-            `${formatTokens(usage.outputTokens)} out (${formatTokens(total)} total)${NC}`
-        );
-      }
+    const usage = parseUsage(resolved.agent, stepLog);
+    if (usage) {
+      tracker.addUsage(usage);
+      showStepUsage(stepName, usage);
     }
 
     log(`  [${stepName}] Completed`);
-    return { success: true };
+    return { success: true, usage };
   } catch {
-    if (resolved.agent === "claude") {
-      const usage = parseClaudeUsage(stepLog);
-      if (usage) tracker.addUsage(usage);
-    }
+    const usage = parseUsage(resolved.agent, stepLog);
+    if (usage) tracker.addUsage(usage);
 
     warn(`  [${stepName}] Exited with non-zero status`);
 
@@ -103,7 +144,7 @@ export function runStep(
       }
     } catch {}
 
-    return { success: false };
+    return { success: false, usage };
   }
 }
 
@@ -151,8 +192,14 @@ export function runStoryPipeline(
         attempt,
       });
 
+      let outcome: StepOutcome;
       const stepStart = Date.now();
-      const outcome = runStep(step, prd, state, defaultAgent, tracker);
+      try {
+        outcome = runStep(step, prd, state, defaultAgent, tracker);
+      } catch (err) {
+        warn(`  [${step}] Unexpected error: ${err instanceof Error ? err.message : err}`);
+        outcome = { success: false };
+      }
       const stepElapsed = Math.floor((Date.now() - stepStart) / 1000);
 
       onEvent?.({
