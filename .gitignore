@@ -1,0 +1,10 @@
+node_modules/
+test-results/
+
+# Gyro Loop — ephemeral state
+.gyro/state/
+.gyro/gyro.log
+.gyro/screenshots/
+
+# Gyro integration tests
+gyro-test/

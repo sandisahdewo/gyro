@@ -1,0 +1,97 @@
+{
+  "project": "bookmarks-api",
+  "models": {
+    "test": "claude:sonnet",
+    "work": "codex:gpt-5.3-codex",
+    "review": "claude:opus",
+    "simplify": "claude:sonnet"
+  },
+  "pipelines": {
+    "setup": [
+      "work",
+      "review"
+    ],
+    "backend-tdd": {
+      "steps": [
+        "test",
+        "work",
+        "review"
+      ],
+      "test_lock": {
+        "test_cmd": "go test ./...",
+        "file_pattern": "*_test.go",
+        "verify_red": true
+      }
+    }
+  },
+  "checkpoints": {
+    "simplify": {
+      "after": [
+        "story-04"
+      ],
+      "on_complete": true
+    }
+  },
+  "stories": [
+    {
+      "id": "story-01",
+      "title": "Initialize Go module and Bookmark model with SQLite persistence",
+      "pipeline": "setup",
+      "acceptance_criteria": [
+        "go.mod exists with module name 'bookmarks-api'",
+        "bookmark.go defines Bookmark struct: ID int64, URL string, Title string, Tags []string, CreatedAt time.Time",
+        "store.go defines BookmarkStore with SQLite via database/sql + modernc.org/sqlite",
+        "NewStore(dbPath) creates table if not exists and returns *BookmarkStore",
+        "go build ./... succeeds with zero errors"
+      ],
+      "passes": false,
+      "priority": 1
+    },
+    {
+      "id": "story-02",
+      "title": "Bookmark CRUD operations with tag filtering",
+      "pipeline": "backend-tdd",
+      "acceptance_criteria": [
+        "Create(url, title, tags) inserts bookmark and returns it with non-zero ID and CreatedAt",
+        "GetByID(id) returns the bookmark or ErrNotFound",
+        "List() returns all bookmarks ordered by CreatedAt descending",
+        "ListByTag(tag) returns only bookmarks containing that tag",
+        "Delete(id) removes the bookmark; subsequent GetByID returns ErrNotFound",
+        "Update(id, url, title, tags) modifies an existing bookmark"
+      ],
+      "passes": false,
+      "priority": 2
+    },
+    {
+      "id": "story-03",
+      "title": "REST API endpoints with JSON responses",
+      "pipeline": "backend-tdd",
+      "acceptance_criteria": [
+        "GET /api/bookmarks returns 200 with JSON array of all bookmarks",
+        "GET /api/bookmarks?tag=golang filters by tag",
+        "POST /api/bookmarks with JSON body {url, title, tags} returns 201 with created bookmark",
+        "GET /api/bookmarks/{id} returns 200 with single bookmark or 404",
+        "PUT /api/bookmarks/{id} with JSON body updates and returns 200",
+        "DELETE /api/bookmarks/{id} returns 204 on success or 404 if not found",
+        "POST /api/bookmarks with missing url returns 400 with error message"
+      ],
+      "passes": false,
+      "priority": 3
+    },
+    {
+      "id": "story-04",
+      "title": "Search and pagination",
+      "pipeline": "backend-tdd",
+      "acceptance_criteria": [
+        "GET /api/bookmarks?q=keyword searches URL and title fields (case-insensitive)",
+        "GET /api/bookmarks?page=2&per_page=10 returns paginated results",
+        "Response includes X-Total-Count header with total matching bookmarks",
+        "Default per_page is 20, max is 100",
+        "Combining ?q=keyword&tag=golang applies both filters",
+        "Empty result returns 200 with empty array, not 404"
+      ],
+      "passes": false,
+      "priority": 4
+    }
+  ]
+}

@@ -1,0 +1,148 @@
+{
+  "project": "notes-app",
+  "work_branches": true,
+  "models": {
+    "work": "codex:gpt-5.3-codex",
+    "review": "claude:opus",
+    "simplify": "claude:sonnet"
+  },
+  "pipelines": {
+    "setup":        ["work", "review"],
+    "backend-tdd":  ["work", "review"],
+    "frontend-e2e": ["work", "review", "visual-verify"],
+    "simplify":     ["simplify", "review"]
+  },
+  "checkpoints": {
+    "simplify": {
+      "after": ["story-05"],
+      "on_complete": true
+    }
+  },
+  "stories": [
+    {
+      "id": "story-01",
+      "title": "Initialize project",
+      "pipeline": "setup",
+      "acceptance_criteria": [
+        "package.json exists with dependencies: express, better-sqlite3",
+        "package.json has devDependencies: vitest, supertest",
+        "npm install completes without errors",
+        "Express server in src/app.js exports the app and listens on port 3000 (or PORT env var)",
+        "SQLite database is initialized with a 'notes' table: id (INTEGER PRIMARY KEY AUTOINCREMENT), title (TEXT NOT NULL), body (TEXT DEFAULT ''), created_at (DATETIME DEFAULT CURRENT_TIMESTAMP), updated_at (DATETIME DEFAULT CURRENT_TIMESTAMP)",
+        "npm test runs vitest and exits 0 (at least one placeholder test)"
+      ],
+      "passes": false,
+      "priority": 1
+    },
+    {
+      "id": "story-02",
+      "title": "POST /notes (TDD)",
+      "pipeline": "backend-tdd",
+      "acceptance_criteria": [
+        "Test: POST /notes with {title: 'My Note', body: 'Content'} returns 201 with JSON containing id (number), title, body, created_at, updated_at",
+        "Test: POST /notes with empty title returns 400 with {error: 'title is required'}",
+        "Test: POST /notes with title only (no body) returns 201 with body as empty string",
+        "Implementation makes all tests pass",
+        "npm test passes"
+      ],
+      "passes": false,
+      "priority": 2
+    },
+    {
+      "id": "story-03",
+      "title": "GET /notes + GET /notes/:id (TDD)",
+      "pipeline": "backend-tdd",
+      "acceptance_criteria": [
+        "Test: GET /notes on empty database returns 200 with []",
+        "Test: GET /notes after creating 2 notes returns 200 with array of length 2",
+        "Test: GET /notes returns notes sorted by created_at descending (newest first)",
+        "Test: GET /notes/:id with valid ID returns 200 with the note object",
+        "Test: GET /notes/:id with non-existent ID returns 404 with {error: 'note not found'}",
+        "Implementation makes all tests pass",
+        "npm test passes"
+      ],
+      "passes": false,
+      "priority": 3
+    },
+    {
+      "id": "story-04",
+      "title": "PUT /notes/:id + DELETE /notes/:id (TDD)",
+      "pipeline": "backend-tdd",
+      "acceptance_criteria": [
+        "Test: PUT /notes/:id with {title: 'Updated', body: 'New body'} returns 200 with updated note",
+        "Test: PUT /notes/:id updates the updated_at timestamp",
+        "Test: PUT /notes/:id with non-existent ID returns 404",
+        "Test: DELETE /notes/:id with valid ID returns 204 with no body",
+        "Test: DELETE /notes/:id with non-existent ID returns 404",
+        "Test: GET /notes/:id after DELETE returns 404 (note is actually removed)",
+        "Implementation makes all tests pass",
+        "npm test passes"
+      ],
+      "passes": false,
+      "priority": 4
+    },
+    {
+      "id": "story-05",
+      "title": "Search notes GET /notes?q=term (TDD)",
+      "pipeline": "backend-tdd",
+      "acceptance_criteria": [
+        "Test: GET /notes?q=hello with a note titled 'Hello World' returns that note in results",
+        "Test: GET /notes?q=content with a note body containing 'Some content here' returns that note",
+        "Test: GET /notes?q=nonexistent returns 200 with []",
+        "Test: GET /notes without q parameter returns all notes (backwards compatible)",
+        "Search is case-insensitive",
+        "Implementation uses SQLite LIKE for title and body columns",
+        "npm test passes"
+      ],
+      "passes": false,
+      "priority": 5
+    },
+    {
+      "id": "story-06",
+      "title": "Frontend: list notes page",
+      "pipeline": "frontend-e2e",
+      "acceptance_criteria": [
+        "public/index.html exists and is served by Express at GET /",
+        "Page fetches GET /notes on load and renders a list of notes",
+        "Each note in the list shows: title, truncated body (max 100 characters with '...' if longer), and formatted date",
+        "When no notes exist, the page shows a 'No notes yet' message",
+        "Page has clean, readable CSS (no external CSS frameworks)",
+        "Opening the page in a browser shows no console errors"
+      ],
+      "passes": false,
+      "priority": 6
+    },
+    {
+      "id": "story-07",
+      "title": "Frontend: create and edit notes",
+      "pipeline": "frontend-e2e",
+      "acceptance_criteria": [
+        "A form with a title input and a body textarea is visible on the page",
+        "Submitting the form with a title creates a new note via POST /notes and refreshes the list",
+        "Submitting with an empty title shows an error message (does not call the API)",
+        "Clicking a note in the list populates the form with that note's title and body for editing",
+        "Submitting while editing calls PUT /notes/:id and refreshes the list",
+        "A 'Cancel' button clears the form and exits edit mode",
+        "After creating or editing, the form is cleared"
+      ],
+      "passes": false,
+      "priority": 7
+    },
+    {
+      "id": "story-08",
+      "title": "Frontend: delete and search",
+      "pipeline": "frontend-e2e",
+      "acceptance_criteria": [
+        "Each note in the list has a 'Delete' button",
+        "Clicking Delete shows a window.confirm prompt; confirming deletes via DELETE /notes/:id and refreshes the list",
+        "Clicking Delete and cancelling the confirm does nothing",
+        "A search input field is visible at the top of the notes list",
+        "Typing in the search input calls GET /notes?q=term and updates the displayed list",
+        "Search requests are debounced at 300ms (no API call until 300ms after last keystroke)",
+        "Clearing the search input shows all notes again"
+      ],
+      "passes": false,
+      "priority": 8
+    }
+  ]
+}

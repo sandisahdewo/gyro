@@ -1,0 +1,97 @@
+{
+  "project": "notes-api",
+  "models": {
+    "test": "claude:sonnet",
+    "work": "codex:gpt-5.3-codex",
+    "review": "claude:opus",
+    "simplify": "claude:sonnet"
+  },
+  "pipelines": {
+    "setup": [
+      "work",
+      "review"
+    ],
+    "backend-tdd": {
+      "steps": [
+        "test",
+        "work",
+        "review"
+      ],
+      "test_lock": {
+        "test_cmd": "npm test",
+        "file_pattern": "*.test.ts,*.spec.ts",
+        "verify_red": true
+      }
+    },
+    "frontend-e2e": [
+      "work",
+      "review"
+    ]
+  },
+  "checkpoints": {
+    "simplify": {
+      "after": [
+        "story-04"
+      ],
+      "on_complete": true
+    }
+  },
+  "stories": [
+    {
+      "id": "story-01",
+      "title": "Initialize Express project with TypeScript and Prisma",
+      "pipeline": "setup",
+      "acceptance_criteria": [
+        "package.json with express, typescript, prisma, vitest devDependencies",
+        "tsconfig.json with strict mode enabled",
+        "prisma/schema.prisma defines Note model: id Int @id, title String, body String, createdAt DateTime, updatedAt DateTime",
+        "npm run build succeeds with zero errors"
+      ],
+      "passes": false,
+      "priority": 1
+    },
+    {
+      "id": "story-02",
+      "title": "Note CRUD service layer",
+      "pipeline": "backend-tdd",
+      "acceptance_criteria": [
+        "createNote({title, body}) returns note with generated id and timestamps",
+        "getNote(id) returns the note or throws NotFoundError",
+        "listNotes() returns all notes ordered by updatedAt descending",
+        "updateNote(id, {title, body}) modifies the note and updates updatedAt",
+        "deleteNote(id) removes the note; subsequent getNote throws NotFoundError"
+      ],
+      "passes": false,
+      "priority": 2
+    },
+    {
+      "id": "story-03",
+      "title": "REST endpoints with validation",
+      "pipeline": "backend-tdd",
+      "acceptance_criteria": [
+        "GET /api/notes returns 200 with JSON array",
+        "POST /api/notes with {title, body} returns 201 with created note",
+        "GET /api/notes/:id returns 200 or 404",
+        "PUT /api/notes/:id with {title, body} returns 200 or 404",
+        "DELETE /api/notes/:id returns 204 or 404",
+        "POST /api/notes with missing title returns 400 with validation error"
+      ],
+      "passes": false,
+      "priority": 3
+    },
+    {
+      "id": "story-04",
+      "title": "Full-text search and pagination",
+      "pipeline": "backend-tdd",
+      "acceptance_criteria": [
+        "GET /api/notes?q=keyword searches title and body (case-insensitive)",
+        "GET /api/notes?page=2&limit=10 returns paginated results",
+        "Response includes x-total-count header",
+        "Default limit is 20, max is 100",
+        "Empty result returns 200 with empty array"
+      ],
+      "passes": false,
+      "priority": 4
+    }
+  ]
+}

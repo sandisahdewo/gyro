@@ -1,0 +1,77 @@
+{
+  "project": "pomodoro-timer",
+  "models": {
+    "work": "codex:gpt-5.3-codex",
+    "review": "claude:opus"
+  },
+  "pipelines": {
+    "default": ["work", "review"]
+  },
+  "stories": [
+    {
+      "id": "story-01",
+      "title": "Base HTML structure with timer display",
+      "pipeline": "default",
+      "acceptance_criteria": [
+        "index.html exists at the project root",
+        "Page has an h1 element with text 'Pomodoro Timer'",
+        "A div#timer element displays '25:00'",
+        "A 'Start' button and a 'Reset' button are visible",
+        "Layout is centered horizontally on the page with clean CSS",
+        "All CSS is inline in a <style> tag — no external stylesheets",
+        "All JS is inline in a <script> tag — no external scripts",
+        "Opening index.html in a browser shows no console errors"
+      ],
+      "passes": false,
+      "priority": 1
+    },
+    {
+      "id": "story-02",
+      "title": "Countdown timer logic",
+      "pipeline": "default",
+      "acceptance_criteria": [
+        "Clicking Start begins a countdown from 25:00, updating the div#timer text every second",
+        "While running, the Start button label changes to 'Pause'",
+        "Clicking Pause stops the countdown and preserves the remaining time",
+        "Clicking Start again resumes from where it was paused",
+        "Clicking Reset returns the display to '25:00' and stops any running countdown",
+        "Timer stops automatically when it reaches '00:00'",
+        "Timer display always shows MM:SS format with leading zeros (e.g., '04:09')"
+      ],
+      "passes": false,
+      "priority": 2
+    },
+    {
+      "id": "story-03",
+      "title": "Session tracking and notifications",
+      "pipeline": "default",
+      "acceptance_criteria": [
+        "A visible counter shows the number of completed work sessions (e.g., 'Sessions: 0')",
+        "When the timer reaches 00:00 after a work session, the session count increments by 1",
+        "When the timer reaches 00:00, the document title flashes between the original title and a notification message",
+        "After a work session completes (25 min), the timer automatically switches to break mode with 5:00 displayed",
+        "A visible label indicates whether the current timer is 'Work' or 'Break'",
+        "After a break session completes (5 min), the timer switches back to work mode with 25:00 displayed",
+        "Reset during break mode returns to work mode at 25:00"
+      ],
+      "passes": false,
+      "priority": 3
+    },
+    {
+      "id": "story-04",
+      "title": "LocalStorage persistence and settings",
+      "pipeline": "default",
+      "acceptance_criteria": [
+        "Session count persists across page reloads (stored in localStorage)",
+        "An input field labeled 'Work (min)' allows setting custom work duration (default 25)",
+        "An input field labeled 'Break (min)' allows setting custom break duration (default 5)",
+        "Custom durations persist in localStorage across page reloads",
+        "Changing the work duration input updates the timer display when not running",
+        "Clicking Reset only resets the current timer — it does NOT reset saved settings or session count",
+        "Invalid input (non-numeric, zero, negative) is ignored — the previous valid value is kept"
+      ],
+      "passes": false,
+      "priority": 4
+    }
+  ]
+}
