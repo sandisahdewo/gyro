@@ -84,7 +84,7 @@ export function resolveModel(
 export function buildCommand(agent: AgentType, model: string): string {
   switch (agent) {
     case "codex":
-      return `codex exec -s danger-full-access${model ? ` -m ${model}` : ""}`;
+      return `codex exec --json -s danger-full-access${model ? ` -m ${model}` : ""}`;
     case "claude":
       return `claude -p --dangerously-skip-permissions --output-format json${model ? ` --model ${model}` : ""}`;
     default:

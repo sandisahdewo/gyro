@@ -83,6 +83,7 @@ State lives in FILES, not in the LLM's memory. Each agent instance
 | `.gyro/state/work-summary.txt`  | What the worker did             |
 | `.gyro/state/review-result.txt` | SHIP or REVISE                  |
 | `.gyro/state/review-feedback.txt` | Reviewer's complaints         |
+| `.gyro/state/lint-summary.txt`  | Detailed lint output            |
 | `.gyro/prd.json`               | All stories + pass/fail status  |
 | `.gyro/progress.txt`           | Append-only completion log      |
 | `.gyro/learnings.md`           | Operational learnings (mistakes & gotchas) |
@@ -135,6 +136,7 @@ project/
     │   ├── work.md             # Worker: implements code
     │   ├── review.md           # Reviewer: catches cheating/bugs
     │   ├── visual-verify.md    # Visual QA: browser screenshots
+    │   ├── lint.md              # Lint/format enforcement
     │   ├── simplify.md         # Simplification pass
     │   ├── plan.md             # Planning mode: gap analysis
     │   └── push.md             # Push to remote (standalone checkpoint)
@@ -147,6 +149,7 @@ project/
         ├── review-result.txt
         ├── review-feedback.txt
         ├── checkpoint-scope.txt # Git tag for scoped checkpoints
+        ├── lint-summary.txt    # Detailed lint checkpoint output
         └── *-output.log        # Raw output from each step
 ```
 
@@ -191,6 +194,7 @@ The `prd.json` file defines your stories, pipelines, and checkpoints.
   "models": {
     "work": "codex:gpt-5.3-codex",
     "review": "claude:opus",
+    "lint": "claude:haiku",
     "simplify": "claude:sonnet",
     "visual-verify": "claude:haiku",
     "plan": "claude:opus"
@@ -202,6 +206,11 @@ The `prd.json` file defines your stories, pipelines, and checkpoints.
     "simplify":     ["simplify", "review"]
   },
   "checkpoints": {
+    "lint": {
+      "after": ["story-06", "story-11"],
+      "on_complete": true,
+      "standalone": true
+    },
     "simplify": {
       "after": ["story-06", "story-11"],
       "on_complete": true
@@ -566,6 +575,17 @@ These patterns are battle-tested:
 - Never force-pushes
 - Runs as a standalone checkpoint (no review loop)
 
+### lint.md — What It Does
+
+- Reads changed files since last lint tag (or full codebase on first run)
+- Auto-detects the project's linter from config files (package.json, .eslintrc, go.mod, pyproject.toml, Cargo.toml, etc.)
+- Runs lint in check mode first — if zero violations, writes NO_CHANGES and stops
+- Runs auto-fix on in-scope files, then manually fixes remaining violations
+- Runs lint again to verify clean, runs quality gates to verify no behavior changed
+- NEVER changes behavior, NEVER refactors — only formatting/style fixes
+- Writes detailed lint output to `.gyro/state/lint-summary.txt`
+- Standalone checkpoint (no review loop — the linter itself is the verifier)
+
 ### simplify.md — What It Does
 
 - Reads changed files since last simplify tag (or full codebase on first run)
@@ -648,6 +668,7 @@ this with the `models` field in `prd.json` using `"agent:model"` format:
   "models": {
     "work": "codex:gpt-5.3-codex",
     "review": "claude:sonnet",
+    "lint": "claude:haiku",
     "simplify": "claude:sonnet",
     "visual-verify": "claude:haiku",
     "plan": "claude:opus"
@@ -678,7 +699,7 @@ and Claude for review, or vice versa.
 | Agent    | CLI Command                                         |
 | -------- | --------------------------------------------------- |
 | `claude` | `claude -p --dangerously-skip-permissions -m MODEL` |
-| `codex`  | `codex exec -s danger-full-access -m MODEL`         |
+| `codex`  | `codex exec --json -s danger-full-access -m MODEL`  |
 
 ### Supported Aliases
 
@@ -731,6 +752,7 @@ model_reasoning_effort = "high"
   "models": {
     "work": "codex:gpt-5.3-codex",
     "review": "claude:opus",
+    "lint": "claude:haiku",
     "simplify": "claude:sonnet",
     "plan": "claude:opus",
     "push": "claude:haiku"
@@ -1192,6 +1214,11 @@ cp ../gyro.sh . && cp -r ../.gyro/prompts .gyro/
     "simplify": ["simplify", "review"]
   },
   "checkpoints": {
+    "lint": {
+      "after": ["s05", "s10", "s15"],
+      "on_complete": true,
+      "standalone": true
+    },
     "simplify": {
       "after": ["s05", "s10", "s15"],
       "on_complete": true
@@ -1201,7 +1228,8 @@ cp ../gyro.sh . && cp -r ../.gyro/prompts .gyro/
 }
 ```
 
-This runs a simplify pass every 5 stories and once at the end.
+This runs lint and simplify passes every 5 stories and once at the end.
+Lint runs before simplify (alphabetical ordering) so simplify gets clean, formatted code.
 
 #### Resuming after failure
 

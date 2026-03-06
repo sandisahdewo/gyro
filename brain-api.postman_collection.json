@@ -1,0 +1,110 @@
+{
+  "info": {
+    "name": "Brain API",
+    "description": "Brain - AI Task Execution Engine API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:7440"
+    },
+    {
+      "key": "projectId",
+      "value": "my-project"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "List Projects",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/projects"
+      }
+    },
+    {
+      "name": "Create Project",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/projects",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"my-project\",\n  \"plan\": \"# My Project\\n\\n## Stories\\n\\n### Story 1: Hello World\\n- Create a simple hello world app\",\n  \"tech\": \"node\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Register Existing Project",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/projects/register",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"existing-project\",\n  \"dir\": \"/home/ubuntu/code/existing-project\",\n  \"plan\": \"# Existing Project Plan\\n\\n## Stories\\n\\n### Story 1: Add feature\\n- Add a new feature\",\n  \"tech\": \"node\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Get Project Details",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/projects/{{projectId}}"
+      }
+    },
+    {
+      "name": "Start Execution",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/projects/{{projectId}}/run"
+      }
+    },
+    {
+      "name": "Stop Execution",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/projects/{{projectId}}/stop"
+      }
+    },
+    {
+      "name": "Get Execution Status",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/projects/{{projectId}}/status"
+      }
+    },
+    {
+      "name": "SSE Event Stream",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/projects/{{projectId}}/events",
+        "description": "Server-Sent Events stream. In Postman, use 'Send and Download' or test via curl: curl -N {{baseUrl}}/projects/{{projectId}}/events"
+      }
+    },
+    {
+      "name": "Queue Status",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/projects/_queue"
+      }
+    }
+  ]
+}
