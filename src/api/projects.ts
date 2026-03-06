@@ -1,8 +1,11 @@
 import { Router, type Request, type Response } from "express";
+import { existsSync } from "fs";
+import { join } from "path";
 import type { ProjectManager } from "../project-manager.js";
 import type { ExecutionQueue } from "../queue.js";
 import type { EventBus } from "../event-bus.js";
-import type { ProgressEvent } from "../types.js";
+import type { ProgressEvent, Story } from "../types.js";
+import { PrdFile } from "../prd.js";
 
 function paramId(req: Request): string {
   const id = req.params.id;
@@ -188,6 +191,70 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
     req.on("close", () => {
       eventBus.removeListener("progress", onProgress);
     });
+  });
+
+  // Add a task (story) to an existing project
+  router.post("/:id/tasks", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const project = pm.getProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const prdPath = join(project.dir, ".gyro", "prd.json");
+    if (!existsSync(prdPath)) {
+      res.status(409).json({ error: "project has no prd.json yet — run the project first so the plan gets converted" });
+      return;
+    }
+
+    const { title, pipeline, acceptance_criteria, plan_ref } = req.body;
+
+    if (!title || typeof title !== "string") {
+      res.status(400).json({ error: "title is required" });
+      return;
+    }
+    if (!acceptance_criteria || !Array.isArray(acceptance_criteria) || acceptance_criteria.length === 0) {
+      res.status(400).json({ error: "acceptance_criteria is required (non-empty array)" });
+      return;
+    }
+
+    try {
+      const prd = new PrdFile(prdPath);
+
+      // Auto-generate id and priority
+      const maxPriority = prd.stories.reduce((max, s) => Math.max(max, s.priority), 0);
+      const storyNum = prd.stories.length + 1;
+      const id = `story-${String(storyNum).padStart(2, "0")}`;
+
+      // Avoid id collision
+      let finalId = id;
+      let counter = storyNum;
+      while (prd.getStory(finalId)) {
+        counter++;
+        finalId = `story-${String(counter).padStart(2, "0")}`;
+      }
+
+      const story: Story = {
+        id: finalId,
+        title,
+        pipeline: pipeline || "setup",
+        acceptance_criteria,
+        passes: false,
+        priority: maxPriority + 1,
+      };
+      if (plan_ref) story.plan_ref = plan_ref;
+
+      prd.data.stories.push(story);
+      prd.save();
+
+      // Update project progress
+      pm.refreshProgress(projectId);
+
+      res.status(201).json(story);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Execution status snapshot

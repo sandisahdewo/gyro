@@ -100,6 +100,23 @@
       }
     },
     {
+      "name": "Add Task to Project",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/projects/{{projectId}}/tasks",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Change greeting to Hello Sandi\",\n  \"pipeline\": \"setup\",\n  \"acceptance_criteria\": [\n    \"The app displays 'Hello Sandi' instead of 'Hello World'\",\n    \"No other functionality is broken\"\n  ]\n}"
+        }
+      }
+    },
+    {
       "name": "Queue Status",
       "request": {
         "method": "GET",

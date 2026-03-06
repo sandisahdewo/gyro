@@ -36,6 +36,7 @@ app.listen(PORT, () => {
   console.log(`  GET    /projects/:id          Get project details + progress`);
   console.log(`  POST   /projects/:id/run      Start execution`);
   console.log(`  POST   /projects/:id/stop     Stop execution`);
+  console.log(`  POST   /projects/:id/tasks    Add a task to existing project`);
   console.log(`  GET    /projects/:id/events   SSE event stream`);
   console.log(`  GET    /projects/:id/status   Execution status snapshot`);
   console.log(`  GET    /projects/_queue       Queue status`);
