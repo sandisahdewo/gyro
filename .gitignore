@@ -1,4 +1,5 @@
 node_modules/
+bin/
 test-results/
 
 # Gyro Loop — ephemeral state
@@ -8,3 +9,6 @@ test-results/
 
 # Gyro integration tests
 gyro-test/
+
+# Project working directories
+projects/

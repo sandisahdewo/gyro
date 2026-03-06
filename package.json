@@ -8,15 +8,20 @@
   },
   "scripts": {
     "build": "tsc",
+    "start": "tsx src/server.ts",
     "gyro": "tsx src/index.ts",
     "convert": "tsx src/convert.ts",
     "test": "node --experimental-vm-modules node_modules/.bin/vitest run",
     "test:watch": "node --experimental-vm-modules node_modules/.bin/vitest"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^25.3.5",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
   }
 }
