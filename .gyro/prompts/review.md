@@ -33,6 +33,16 @@ Use parallel subagents for file reads and code searches. Keep your main context 
 - [ ] Test names clearly describe what they verify
 - [ ] Tests would actually FAIL if the implementation were wrong (mentally trace through)
 
+### E2E Test Quality (for pipelines with e2e in prd.json)
+- [ ] Each acceptance criterion that describes user-visible behavior has a corresponding e2e test
+- [ ] E2e tests perform REAL user interactions (click, type, navigate), not direct API calls or DOM manipulation
+- [ ] E2e tests assert on VISIBLE outcomes (text on screen, element exists, URL changed), not internal state
+- [ ] E2e tests use meaningful selectors (role, label, text content), not brittle ones (CSS classes, nth-child, implementation-specific IDs)
+- [ ] No e2e test that only checks "page loads" or "no console errors" without verifying actual behavior
+- [ ] E2e tests would FAIL if the feature were removed or broken (mentally trace through)
+- [ ] Frontend code does not hardcode data or responses to make e2e tests pass
+- [ ] No shortcut implementations like inline JSON, mock data rendered as if real, or conditional logic that only activates during tests
+
 ### Implementation Quality (check ONLY files shown by `git diff --name-only`)
 - [ ] No hardcoded return values (e.g., always returning a fixed JSON)
 - [ ] No stub functions or placeholder logic (e.g., `// TODO: implement`)

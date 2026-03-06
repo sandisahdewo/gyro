@@ -1,6 +1,10 @@
 {
   "project": "notes-app",
   "work_branches": true,
+  "env": {
+    "up": "docker compose up -d --wait",
+    "down": "docker compose down"
+  },
   "models": {
     "work": "codex:gpt-5.3-codex",
     "review": "claude:opus",
@@ -10,10 +14,27 @@
   "pipelines": {
     "setup":        ["work", "review"],
     "backend-tdd":  ["work", "review"],
-    "frontend-e2e": ["work", "review", "visual-verify"],
+    "frontend": {
+      "steps": ["work", "review"],
+      "e2e": {
+        "test_cmd": "npx playwright test",
+        "test_cmd_file": "npx playwright test {files}",
+        "file_pattern": "*.spec.ts,*.e2e.ts"
+      }
+    },
     "simplify":     ["simplify", "review"]
   },
   "checkpoints": {
+    "test-all": {
+      "cmd": "npm test && npx playwright test",
+      "after": "each",
+      "on_complete": true
+    },
+    "build": {
+      "cmd": "npm run build",
+      "after": "each",
+      "on_complete": true
+    },
     "lint": {
       "after": ["story-05"],
       "on_complete": true,
@@ -106,7 +127,7 @@
     {
       "id": "story-06",
       "title": "Frontend: list notes page",
-      "pipeline": "frontend-e2e",
+      "pipeline": "frontend",
       "acceptance_criteria": [
         "public/index.html exists and is served by Express at GET /",
         "Page fetches GET /notes on load and renders a list of notes",
@@ -121,7 +142,7 @@
     {
       "id": "story-07",
       "title": "Frontend: create and edit notes",
-      "pipeline": "frontend-e2e",
+      "pipeline": "frontend",
       "acceptance_criteria": [
         "A form with a title input and a body textarea is visible on the page",
         "Submitting the form with a title creates a new note via POST /notes and refreshes the list",
@@ -137,7 +158,7 @@
     {
       "id": "story-08",
       "title": "Frontend: delete and search",
-      "pipeline": "frontend-e2e",
+      "pipeline": "frontend",
       "acceptance_criteria": [
         "Each note in the list has a 'Delete' button",
         "Clicking Delete shows a window.confirm prompt; confirming deletes via DELETE /notes/:id and refreshes the list",

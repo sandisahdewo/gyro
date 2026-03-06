@@ -6,9 +6,16 @@ export interface TestLock {
   verify_green?: boolean;
 }
 
+export interface E2eConfig {
+  test_cmd: string;
+  test_cmd_file?: string;
+  file_pattern: string;
+}
+
 export interface PipelineObject {
   steps: string[];
   test_lock?: TestLock;
+  e2e?: E2eConfig;
 }
 
 export type PipelineConfig = string[] | PipelineObject;
@@ -30,9 +37,15 @@ export interface Story {
   priority: number;
 }
 
+export interface EnvConfig {
+  up: string;
+  down: string;
+}
+
 export interface PRD {
   project: string;
   work_branches?: boolean;
+  env?: EnvConfig;
   models?: Record<string, string>;
   pipelines: Record<string, PipelineConfig>;
   checkpoints?: Record<string, Checkpoint>;

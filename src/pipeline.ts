@@ -122,6 +122,7 @@ export function runStoryPipeline(
   const story = prd.getStory(storyId)!;
   const steps = prd.getStoryPipelineSteps(storyId);
   const testLock = prd.getStoryTestLock(storyId);
+  const e2e = prd.getStoryE2e(storyId);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     log(`Attempt ${attempt}/${maxRetries}`);
@@ -154,8 +155,8 @@ export function runStoryPipeline(
 
       log(`  [${step}] Done (${formatDuration(stepElapsed)})`);
 
-      // Run post-step gates (test-lock)
-      if (!runPostStepGate(state, testLock, step)) {
+      // Run post-step gates
+      if (!runPostStepGate(state, testLock, e2e, step)) {
         warn(`  [${step}] Gate failed -- treating as REVISE`);
         const feedback = state.getReviewFeedback();
         if (feedback) {

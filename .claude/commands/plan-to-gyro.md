@@ -23,8 +23,11 @@ Convert the plan into Gyro Loop stories in .gyro/prd.json. Follow these rules:
 Assign each story the correct pipeline based on what it does:
 - `setup` — project initialization, config, scaffolding (simple array: `["work", "review"]`)
 - `backend-tdd` — any backend endpoint, logic, or data layer work (object with test_lock — see format below)
-- `frontend-e2e` — any UI component, page, or interaction (simple array: `["work", "review", "visual-verify"]`)
+- `frontend` — any UI component, page, or interaction (object with e2e — see format below)
 - `simplify` — only for checkpoint stories, never assign to feature stories
+
+Visual-verify is optional — only add it when the story requires visual/brand verification.
+If needed, add it as a step: `["work", "review", "visual-verify"]`.
 
 The `backend-tdd` pipeline MUST be an object (not an array):
 ```json
@@ -48,6 +51,23 @@ Set test_cmd, test_cmd_file, and file_pattern based on the project's language:
 - Rust:       test_cmd = "cargo test",      file_pattern = "*_test.rs"
 
 Always set verify_red: true and verify_green: true.
+
+The `frontend` pipeline MUST be an object (not an array):
+```json
+"frontend": {
+  "steps": ["work", "review"],
+  "e2e": {
+    "test_cmd": "npx playwright test",
+    "test_cmd_file": "npx playwright test {files}",
+    "file_pattern": "*.spec.ts,*.e2e.ts"
+  }
+}
+```
+
+The verify_e2e gate runs only the story's changed e2e test files after the work step.
+`test_cmd_file` uses `{files}` placeholder for scoped execution (same pattern as backend).
+If visual-verify is needed, add it to steps: `["work", "review", "visual-verify"]`.
+
 Also ensure models config includes `"test": "claude:sonnet"` and `"fix": "claude:sonnet"`.
 
 If the project has custom pipelines in prd.json, use those. If the plan mentions

@@ -26,14 +26,18 @@
         "verify_green": true
       }
     },
-    "frontend-e2e": [
-      "work",
-      "review"
-    ]
+    "frontend": {
+      "steps": ["work", "review"],
+      "e2e": {
+        "test_cmd": "npx playwright test",
+        "test_cmd_file": "npx playwright test {files}",
+        "file_pattern": "*.spec.ts,*.e2e.ts"
+      }
+    }
   },
   "checkpoints": {
     "test-all": {
-      "cmd": "npm test",
+      "cmd": "npm test && npx playwright test",
       "after": "each",
       "on_complete": true
     },

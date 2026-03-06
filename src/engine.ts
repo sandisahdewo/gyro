@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
-import type { AgentType } from "./types.js";
+import { execSync } from "child_process";
+import type { AgentType, EnvConfig } from "./types.js";
 import { PrdFile } from "./prd.js";
 import { State } from "./state.js";
 import { ProgressTracker } from "./progress.js";
@@ -7,6 +8,28 @@ import { runStep, runStoryPipeline } from "./pipeline.js";
 import { runCheckpoint } from "./checkpoint.js";
 import * as git from "./git.js";
 import { log, ok, warn, fail, hr, formatDuration, BOLD, DIM, CYAN, YELLOW, GREEN, NC } from "./log.js";
+
+function envUp(env: EnvConfig) {
+  log(`Starting environment: ${DIM}${env.up}${NC}`);
+  try {
+    execSync(env.up, { stdio: "inherit", shell: "/bin/bash" });
+    ok("Environment is up");
+  } catch {
+    fail("Failed to start environment");
+    fail(`Command: ${env.up}`);
+    process.exit(1);
+  }
+}
+
+function envDown(env: EnvConfig) {
+  log(`Stopping environment: ${DIM}${env.down}${NC}`);
+  try {
+    execSync(env.down, { stdio: "inherit", shell: "/bin/bash" });
+    ok("Environment stopped");
+  } catch {
+    warn("Failed to stop environment cleanly");
+  }
+}
 
 export interface EngineConfig {
   maxRetries: number;
@@ -24,6 +47,13 @@ export function dryRun(prd: PrdFile, config: EngineConfig, tracker: ProgressTrac
     console.log(`  ${CYAN}Work branches: enabled${NC} (base: ${config.baseBranch})`);
   }
 
+  if (prd.hasEnv()) {
+    const env = prd.getEnv()!;
+    console.log(`  ${CYAN}Environment:${NC}`);
+    console.log(`    ${DIM}up:   ${env.up}${NC}`);
+    console.log(`    ${DIM}down: ${env.down}${NC}`);
+  }
+
   // Show pipeline gates
   for (const [name, config_] of Object.entries(prd.data.pipelines)) {
     if (Array.isArray(config_)) continue;
@@ -37,6 +67,9 @@ export function dryRun(prd: PrdFile, config: EngineConfig, tracker: ProgressTrac
       console.log(`  ${CYAN}${name} gates: ${gates.join(", ")}${NC}`);
       if (tl.test_cmd_file) console.log(`  ${DIM}scoped tests: ${tl.test_cmd_file}${NC}`);
     }
+    if (obj.e2e) {
+      console.log(`  ${CYAN}${name} gates: verify_e2e (${obj.e2e.test_cmd})${NC}`);
+    }
   }
 
   console.log("");
@@ -45,6 +78,7 @@ export function dryRun(prd: PrdFile, config: EngineConfig, tracker: ProgressTrac
     const status = story.passes ? `${GREEN}OK${NC}` : "[ ]";
     const steps = prd.getPipelineSteps(story.pipeline);
     const testLock = prd.getTestLock(story.pipeline);
+    const e2e = prd.getE2e(story.pipeline);
     const branchStr = prd.useWorkBranches() ? ` ${DIM}-> gyro/${story.id}${NC}` : "";
 
     // Build step display with gates inline
@@ -56,10 +90,14 @@ export function dryRun(prd: PrdFile, config: EngineConfig, tracker: ProgressTrac
         if (testLock.verify_red) gates.push("verify_red");
         if (gates.length) stepParts.push(`${YELLOW}[${gates.join(" + ")}]${NC}`);
       }
-      if (testLock && step === "work") {
-        const gates: string[] = ["test_lock"];
-        if (testLock.verify_green) gates.push("verify_green");
-        stepParts.push(`${YELLOW}[${gates.join(" + ")}]${NC}`);
+      if (step === "work") {
+        const gates: string[] = [];
+        if (testLock) {
+          gates.push("test_lock");
+          if (testLock.verify_green) gates.push("verify_green");
+        }
+        if (e2e) gates.push("verify_e2e");
+        if (gates.length) stepParts.push(`${YELLOW}[${gates.join(" + ")}]${NC}`);
       }
     }
 
@@ -170,6 +208,12 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig) {
   tracker.showProgressBar(prd.countPassed(), prd.countStories());
   hr();
 
+  // Start environment if configured
+  const env = prd.getEnv();
+  if (env) {
+    envUp(env);
+  }
+
   const startTime = Date.now();
 
   // Main loop
@@ -183,6 +227,9 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig) {
       for (const cpName of prd.getOnCompleteCheckpoints()) {
         runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile);
       }
+
+      // Stop environment
+      if (env) envDown(env);
 
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
       console.log("");
@@ -254,6 +301,9 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig) {
       fail("Last review feedback:");
       console.log(state.getReviewFeedback() ?? "(none)");
       console.log("");
+      // Stop environment
+      if (env) envDown(env);
+
       fail(`Stopping. Fix the issue and run: npx tsx src/index.ts --from ${story.id}`);
       fail(`Total time: ${formatDuration(totalElapsed)}`);
       process.exit(1);

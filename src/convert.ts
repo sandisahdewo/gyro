@@ -85,14 +85,29 @@ Convert the following implementation plan into a Gyro Loop prd.json file.
 Assign pipelines based on story type:
 - "setup" -> simple array: ["work", "review"] -- project init, config, scaffolding
 - "backend-tdd" -> object with test_lock (see format below) -- API endpoints, logic, data layer (strict TDD)
-- "frontend-e2e" -> simple array: ["work", "review", "visual-verify"] -- UI pages, components (e2e test)
+- "frontend" -> object with e2e (see format below) -- UI pages, components
 
 The backend-tdd pipeline uses a 3-step flow: test -> work -> review.
 A separate "test" agent writes failing tests FIRST, then the "work" agent implements code
 to make them pass. The test_lock gate enforces this by checksumming test files.
 
+The frontend pipeline uses: work -> review.
+The work step builds the UI AND writes e2e tests. The verify_e2e gate runs the e2e
+tests after the work step to confirm they pass.
+Visual-verify is optional -- only add it when the story requires visual/brand verification.
+If visual-verify is needed, add it as a step: ["work", "review", "visual-verify"].
+
 DO NOT create stories with a "simplify" pipeline. Simplification is handled automatically
 by the checkpoint system -- never add simplify stories to the stories array.
+
+### Environment (optional)
+If the project needs infrastructure services (database, Redis, etc.), add an "env" config.
+The engine starts it before the loop and tears it down after.
+- "up": command to start all services (e.g., "docker compose up -d --wait")
+- "down": command to stop all services (e.g., "docker compose down")
+Only add env if the project uses Docker/docker-compose or similar.
+If AGENTS.md or the plan mentions Docker, docker-compose, database, Redis, or other services, add env.
+If the project is simple (no external services), omit env entirely.
 
 ### Detecting test_lock config from tech stack
 Set test_cmd, test_cmd_file, and file_pattern based on the project's language:
@@ -134,7 +149,7 @@ For backend-tdd stories:
 - Do NOT use "Write test FIRST:" prefix -- the test step handles this automatically
 - Just describe WHAT to test and implement, not HOW to do TDD
 
-For frontend-e2e stories, always include:
+For frontend stories, always include:
 - UI description criteria
 - "E2E test: [action] -> [expected result]"
 
@@ -148,9 +163,12 @@ Configure checkpoints (these run automatically, NOT as stories).
 The engine runs them in standard order: lint -> simplify -> test-all -> type-check -> build.
 
 Command checkpoints (run a command, auto-fix on failure):
-- "test-all": runs full test suite to catch regressions
+- "test-all": runs ALL tests (unit + e2e) to catch regressions
   - "after": "each", "on_complete": true
-  - "cmd": the project's test command (e.g., "npm test", "go test ./...")
+  - "cmd": combine all test commands in one (e.g., "npm test && npx playwright test")
+  - For backend-only: just the unit test command (e.g., "go test ./...")
+  - For frontend-only: just the e2e command (e.g., "npx playwright test")
+  - For monorepo: chain them (e.g., "npm test && npx playwright test")
 - "type-check": static type analysis
   - "after": "each", "on_complete": true
   - "cmd": the project's type-check command (e.g., "npx tsc --noEmit", "go vet ./...")
@@ -186,6 +204,10 @@ The JSON must match this structure exactly:
 
 {
   "project": "project-name",
+  "env": {
+    "up": "docker compose up -d --wait",
+    "down": "docker compose down"
+  },
   "models": {
     "test": "claude:sonnet",
     "work": "codex:gpt-5.3-codex",
@@ -207,7 +229,14 @@ The JSON must match this structure exactly:
         "verify_green": true
       }
     },
-    "frontend-e2e": ["work", "review", "visual-verify"]
+    "frontend": {
+      "steps": ["work", "review"],
+      "e2e": {
+        "test_cmd": "<full e2e test command>",
+        "test_cmd_file": "<scoped e2e test command with {files}>",
+        "file_pattern": "<e2e test file glob>"
+      }
+    }
   },
   "checkpoints": {
     "test-all": {
@@ -387,6 +416,45 @@ if (backendCount > 0 && !Array.isArray(prd.pipelines["backend-tdd"])) {
   }
 }
 
+// Fix frontend pipeline if generated as array or as "frontend-e2e"
+for (const name of ["frontend", "frontend-e2e"]) {
+  const frontendPipeline = prd.pipelines[name];
+  if (frontendPipeline && Array.isArray(frontendPipeline)) {
+    warn(`${name} pipeline generated as array -- converting to object with e2e`);
+    const steps = (frontendPipeline as string[]).filter((s) => s !== "visual-verify");
+    prd.pipelines[name] = {
+      steps,
+      e2e: {
+        test_cmd: "npx playwright test",
+        test_cmd_file: "npx playwright test {files}",
+        file_pattern: "*.spec.ts,*.e2e.ts",
+      },
+    };
+    ok(`Fixed: ${name} -> ${steps.join(" -> ")} [verify_e2e]`);
+  }
+  // Ensure e2e config exists and is complete on object pipelines
+  if (frontendPipeline && !Array.isArray(frontendPipeline)) {
+    const p = frontendPipeline as any;
+    if (!p.e2e) {
+      p.e2e = {
+        test_cmd: "npx playwright test",
+        test_cmd_file: "npx playwright test {files}",
+        file_pattern: "*.spec.ts,*.e2e.ts",
+      };
+      ok(`Fixed: added e2e config to ${name} pipeline`);
+    } else {
+      if (!p.e2e.test_cmd_file) {
+        p.e2e.test_cmd_file = "npx playwright test {files}";
+        ok(`Fixed: added test_cmd_file to ${name} e2e config`);
+      }
+      if (!p.e2e.file_pattern) {
+        p.e2e.file_pattern = "*.spec.ts,*.e2e.ts";
+        ok(`Fixed: added file_pattern to ${name} e2e config`);
+      }
+    }
+  }
+}
+
 // Ensure fix model
 prd.models = prd.models ?? {};
 if (!prd.models.fix) {
@@ -398,9 +466,21 @@ if (prd.stories.length > 0) {
   prd.checkpoints = prd.checkpoints ?? {};
 
   // Command checkpoints
-  if (!prd.checkpoints["test-all"] && tech.testCmd) {
-    prd.checkpoints["test-all"] = { cmd: tech.testCmd, after: "each", on_complete: true };
-    ok(`Fixed: added test-all checkpoint (${tech.testCmd})`);
+  // test-all: combines all test commands (unit + e2e if applicable)
+  if (!prd.checkpoints["test-all"]) {
+    const hasFrontend = prd.stories.some((s) => s.pipeline === "frontend" || s.pipeline === "frontend-e2e");
+    const e2eCmd = (prd.pipelines["frontend"] as any)?.e2e?.test_cmd
+      ?? (prd.pipelines["frontend-e2e"] as any)?.e2e?.test_cmd;
+    let testAllCmd = tech.testCmd;
+    if (hasFrontend && e2eCmd && e2eCmd !== tech.testCmd) {
+      testAllCmd = `${tech.testCmd} && ${e2eCmd}`;
+    } else if (hasFrontend && !tech.testCmd) {
+      testAllCmd = e2eCmd ?? "npx playwright test";
+    }
+    if (testAllCmd) {
+      prd.checkpoints["test-all"] = { cmd: testAllCmd, after: "each", on_complete: true };
+      ok(`Fixed: added test-all checkpoint (${testAllCmd})`);
+    }
   }
   if (!prd.checkpoints["type-check"] && tech.typeCheck) {
     prd.checkpoints["type-check"] = { cmd: tech.typeCheck, after: "each", on_complete: true };
@@ -426,7 +506,7 @@ if (prd.stories.length > 0) {
 
 // --- Summary ---
 const setupCount = prd.stories.filter((s) => s.pipeline === "setup").length;
-const frontendCount = prd.stories.filter((s) => s.pipeline === "frontend-e2e").length;
+const frontendCount = prd.stories.filter((s) => s.pipeline === "frontend" || s.pipeline === "frontend-e2e").length;
 const otherCount = prd.stories.length - setupCount - backendCount - frontendCount;
 
 const testLockConfig = !Array.isArray(prd.pipelines["backend-tdd"])
@@ -450,6 +530,20 @@ if (testLockConfig) {
   console.log(`    verify_red:      ${testLockConfig.verify_red ?? false}`);
   console.log(`    verify_green:    ${testLockConfig.verify_green ?? false}`);
   console.log(`    flow:            test -> ${YELLOW}[verify_red]${NC} -> work -> ${YELLOW}[test_lock + verify_green]${NC} -> review`);
+}
+
+// Show frontend e2e config
+for (const name of ["frontend", "frontend-e2e"]) {
+  const fp = prd.pipelines[name];
+  if (fp && !Array.isArray(fp)) {
+    const e2eConfig = (fp as any).e2e;
+    if (e2eConfig) {
+      const steps = (fp as any).steps as string[];
+      console.log(`  ${BOLD}Pipeline gates (${name}):${NC}`);
+      console.log(`    e2e test_cmd:    ${e2eConfig.test_cmd}`);
+      console.log(`    flow:            ${steps.join(" -> ").replace("work", `work -> ${YELLOW}[verify_e2e]${NC}`)}`);
+    }
+  }
 }
 console.log("");
 

@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "fs";
-import type { PRD, Story, PipelineConfig, PipelineObject, TestLock, Checkpoint } from "./types.js";
+import type { PRD, Story, PipelineConfig, PipelineObject, TestLock, E2eConfig, Checkpoint, EnvConfig } from "./types.js";
 
 export class PrdFile {
   data: PRD;
@@ -89,6 +89,18 @@ export class PrdFile {
     return this.getTestLock(story.pipeline);
   }
 
+  getE2e(pipelineName: string): E2eConfig | undefined {
+    const config = this.data.pipelines[pipelineName];
+    if (!config || Array.isArray(config)) return undefined;
+    return (config as PipelineObject).e2e;
+  }
+
+  getStoryE2e(storyId: string): E2eConfig | undefined {
+    const story = this.getStory(storyId);
+    if (!story) return undefined;
+    return this.getE2e(story.pipeline);
+  }
+
   // --- Models ---
 
   getModelConfig(stepName: string): string | undefined {
@@ -140,6 +152,16 @@ export class PrdFile {
 
   isStandalone(checkpointName: string): boolean {
     return !!this.checkpoints[checkpointName]?.standalone;
+  }
+
+  // --- Environment ---
+
+  getEnv(): EnvConfig | undefined {
+    return this.data.env;
+  }
+
+  hasEnv(): boolean {
+    return !!this.data.env;
   }
 
   // --- Work branches ---
