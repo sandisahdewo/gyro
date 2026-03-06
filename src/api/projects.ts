@@ -172,18 +172,17 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
       Connection: "keep-alive",
     });
 
+    const writeEvent = (event: ProgressEvent) =>
+      res.write(`id: ${event.timestamp}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+
     // Send buffered events (catch-up)
     const lastEventId = req.headers["last-event-id"] as string | undefined;
     const recent = eventBus.getRecentEvents(projectId, lastEventId);
-    for (const event of recent) {
-      res.write(`id: ${event.timestamp}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-    }
+    for (const event of recent) writeEvent(event);
 
     // Stream new events
     const onProgress = (event: ProgressEvent) => {
-      if (event.projectId === projectId) {
-        res.write(`id: ${event.timestamp}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-      }
+      if (event.projectId === projectId) writeEvent(event);
     };
 
     eventBus.on("progress", onProgress);
