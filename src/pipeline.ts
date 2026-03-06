@@ -150,6 +150,7 @@ export function runStep(
 
 export interface PipelineResult {
   shipped: boolean;
+  attempt: number;
 }
 
 export function runStoryPipeline(
@@ -266,13 +267,13 @@ export function runStoryPipeline(
     }
 
     if (!stepFailed) {
-      return { shipped: true };
+      return { shipped: true, attempt };
     }
 
     if (attempt === maxRetries) {
-      return { shipped: false };
+      return { shipped: false, attempt };
     }
   }
 
-  return { shipped: false };
+  return { shipped: false, attempt: maxRetries };
 }

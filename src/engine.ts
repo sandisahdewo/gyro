@@ -301,14 +301,14 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig, onEv
         warn("Continuing anyway...");
       }
 
-      ok(`${story.id} SHIPPED on attempt (${formatDuration(storyElapsed)})`);
+      ok(`${story.id} SHIPPED on attempt ${result.attempt} (${formatDuration(storyElapsed)})`);
       tracker.showStoryUsage();
       prd.markStoryPassed(story.id);
 
       onEvent?.({
         type: "story_ship",
         storyId: story.id,
-        attempt: 1,
+        attempt: result.attempt,
         duration: storyElapsed,
         progress: { passed: prd.countPassed(), total: prd.countStories() },
       });
