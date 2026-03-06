@@ -83,6 +83,73 @@ export class ProjectManager {
     return project;
   }
 
+  /**
+   * Register an existing project directory.
+   * The directory must exist. If it has a prd.json, progress is read from it.
+   * If it has a plan.md but no prd.json, conversion will happen on /run.
+   * If plan is provided, it overwrites the existing plan.md (useful for adding new stories).
+   */
+  registerProject(name: string, dir: string, opts?: { plan?: string; tech?: string }): Project {
+    const resolvedDir = resolve(dir);
+    if (!existsSync(resolvedDir)) {
+      throw new Error(`Directory not found: ${resolvedDir}`);
+    }
+
+    const id = this.slugify(name);
+    if (this.projects.has(id)) {
+      throw new Error(`Project "${id}" already exists`);
+    }
+
+    // Write plan if provided
+    if (opts?.plan) {
+      writeFileSync(join(resolvedDir, "plan.md"), opts.plan);
+    }
+
+    // Copy prompts only if .gyro/prompts doesn't exist yet
+    const promptsDir = join(resolvedDir, ".gyro", "prompts");
+    if (!existsSync(promptsDir)) {
+      this.copyPrompts(resolvedDir);
+    }
+
+    // Determine initial status from existing state
+    const prdPath = join(resolvedDir, ".gyro", "prd.json");
+    const hasPrd = existsSync(prdPath);
+    const hasPlan = existsSync(join(resolvedDir, "plan.md"));
+    let status: Project["status"] = "created";
+    let progress: { passed: number; total: number } | undefined;
+
+    if (hasPrd) {
+      try {
+        const prd: PRD = JSON.parse(readFileSync(prdPath, "utf-8"));
+        const total = prd.stories.length;
+        const passed = prd.stories.filter((s) => s.passes).length;
+        progress = { passed, total };
+        // If all passed, mark as completed
+        status = passed === total ? "completed" : "created";
+      } catch {}
+    }
+
+    if (!hasPrd && !hasPlan && !opts?.plan) {
+      throw new Error(`Directory has no plan.md or .gyro/prd.json: ${resolvedDir}`);
+    }
+
+    const now = new Date().toISOString();
+    const project: Project = {
+      id,
+      name,
+      status,
+      dir: resolvedDir,
+      tech: opts?.tech,
+      createdAt: now,
+      updatedAt: now,
+      progress,
+    };
+
+    this.projects.set(id, project);
+    this.save();
+    return project;
+  }
+
   private copyPrompts(projectDir: string) {
     const promptsDir = join(projectDir, ".gyro", "prompts");
     mkdirSync(promptsDir, { recursive: true });

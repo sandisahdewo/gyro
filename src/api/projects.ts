@@ -3,7 +3,7 @@ import type { ProjectManager } from "../project-manager.js";
 import type { ExecutionQueue } from "../queue.js";
 
 function paramId(req: Request): string {
-  const id = paramId(req);
+  const id = req.params.id;
   return Array.isArray(id) ? id[0] : id;
 }
 
@@ -44,6 +44,34 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue): 
         name: project.name,
         status: project.status,
         dir: project.dir,
+        createdAt: project.createdAt,
+      });
+    } catch (err: any) {
+      res.status(409).json({ error: err.message });
+    }
+  });
+
+  // Register an existing project directory
+  router.post("/register", (req: Request, res: Response) => {
+    const { name, dir, plan, tech } = req.body;
+
+    if (!name || typeof name !== "string") {
+      res.status(400).json({ error: "name is required" });
+      return;
+    }
+    if (!dir || typeof dir !== "string") {
+      res.status(400).json({ error: "dir is required (absolute path to existing project)" });
+      return;
+    }
+
+    try {
+      const project = pm.registerProject(name, dir, { plan, tech });
+      res.status(201).json({
+        id: project.id,
+        name: project.name,
+        status: project.status,
+        dir: project.dir,
+        progress: project.progress,
         createdAt: project.createdAt,
       });
     } catch (err: any) {
