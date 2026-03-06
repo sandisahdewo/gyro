@@ -4,6 +4,7 @@
     "test": "claude:sonnet",
     "work": "codex:gpt-5.3-codex",
     "review": "claude:opus",
+    "lint": "claude:haiku",
     "simplify": "claude:sonnet"
   },
   "pipelines": {
@@ -19,8 +20,10 @@
       ],
       "test_lock": {
         "test_cmd": "npm test",
+        "test_cmd_file": "npx vitest {files}",
         "file_pattern": "*.test.ts,*.spec.ts",
-        "verify_red": true
+        "verify_red": true,
+        "verify_green": true
       }
     },
     "frontend-e2e": [
@@ -29,6 +32,28 @@
     ]
   },
   "checkpoints": {
+    "test-all": {
+      "cmd": "npm test",
+      "after": "each",
+      "on_complete": true
+    },
+    "type-check": {
+      "cmd": "npx tsc --noEmit",
+      "after": "each",
+      "on_complete": true
+    },
+    "build": {
+      "cmd": "npm run build",
+      "after": "each",
+      "on_complete": true
+    },
+    "lint": {
+      "after": [
+        "story-04"
+      ],
+      "on_complete": true,
+      "standalone": true
+    },
     "simplify": {
       "after": [
         "story-04"

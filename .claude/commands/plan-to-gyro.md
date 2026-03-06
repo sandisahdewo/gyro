@@ -31,21 +31,24 @@ The `backend-tdd` pipeline MUST be an object (not an array):
 "backend-tdd": {
   "steps": ["test", "work", "review"],
   "test_lock": {
-    "test_cmd": "<test command>",
+    "test_cmd": "<full test command>",
+    "test_cmd_file": "<scoped test command with {files}>",
     "file_pattern": "<test file glob>",
-    "verify_red": true
+    "verify_red": true,
+    "verify_green": true
   }
 }
 ```
 
-Set test_cmd and file_pattern based on the project's language:
-- Go:         test_cmd = "go test ./...",   file_pattern = "*_test.go"
-- TypeScript: test_cmd = "npm test",        file_pattern = "*.test.ts,*.spec.ts"
-- JavaScript: test_cmd = "npm test",        file_pattern = "*.test.js,*.spec.js"
-- Python:     test_cmd = "pytest",          file_pattern = "test_*.py,*_test.py"
+Set test_cmd, test_cmd_file, and file_pattern based on the project's language:
+- Go:         test_cmd = "go test ./...",   test_cmd_file = "go test {files}",   file_pattern = "*_test.go"
+- TypeScript: test_cmd = "npm test",        test_cmd_file = "npx vitest {files}", file_pattern = "*.test.ts,*.spec.ts"
+- JavaScript: test_cmd = "npm test",        test_cmd_file = "npx vitest {files}", file_pattern = "*.test.js,*.spec.js"
+- Python:     test_cmd = "pytest",          test_cmd_file = "pytest {files}",     file_pattern = "test_*.py,*_test.py"
 - Rust:       test_cmd = "cargo test",      file_pattern = "*_test.rs"
 
-Also ensure models config includes `"test": "claude:sonnet"`.
+Always set verify_red: true and verify_green: true.
+Also ensure models config includes `"test": "claude:sonnet"` and `"fix": "claude:sonnet"`.
 
 If the project has custom pipelines in prd.json, use those. If the plan mentions
 work that doesn't fit existing pipelines, create a new pipeline and explain it.
@@ -53,6 +56,13 @@ work that doesn't fit existing pipelines, create a new pipeline and explain it.
 ### Acceptance Criteria Rules
 Each criterion must be SPECIFIC and VERIFIABLE. The AI reviewer will check these
 one-by-one, so vague criteria cause the loop to fail.
+
+Only describe WHAT the story delivers — business logic and behavior.
+Do NOT include infrastructure criteria that are already enforced by gates/checkpoints:
+- "All prior tests still pass" (test-all checkpoint)
+- "npm run build succeeds" (build checkpoint)
+- "No lint errors" (lint checkpoint)
+- "Tests are written first" (TDD pipeline)
 
 BAD:  "Validates input"
 GOOD: "POST /items with empty name returns 400 with {error: 'name is required'}"
@@ -63,19 +73,35 @@ GOOD: "GET /items after creating 3 items returns 200 with array of length 3"
 BAD:  "Looks good"
 GOOD: "Form has text input with placeholder 'Item name' and button labeled 'Add'"
 
+BAD:  "All prior tests still pass" (redundant — enforced by engine)
+
 For backend-tdd stories:
 - Do NOT use "Write test FIRST:" prefix — the separate test step handles TDD automatically
 - Just describe WHAT to test and implement, not HOW to do TDD
-- Always include "All prior tests still pass" as the last criterion
 
 For frontend e2e stories, always include criteria like:
 - "E2E test: [specific user action] → [specific expected result]"
 
 ### Checkpoint Placement
-Add simplify checkpoints at natural boundaries:
-- After all backend stories are done
-- After all frontend stories are done
-- on_complete: true (final cleanup pass)
+The engine runs checkpoints in standard order: lint -> simplify -> test-all -> type-check -> build.
+
+Command checkpoints (after each story + on_complete):
+- `test-all`: full test suite for regression checking
+  - Go: `"cmd": "go test ./..."`
+  - TypeScript: `"cmd": "npm test"`
+  - Python: `"cmd": "pytest"`
+- `type-check`: static type analysis
+  - Go: `"cmd": "go vet ./..."`
+  - TypeScript: `"cmd": "npx tsc --noEmit"`
+  - Rust: `"cmd": "cargo clippy"`
+- `build`: full compile/bundle
+  - Go: `"cmd": "go build ./..."`
+  - TypeScript: `"cmd": "npm run build"`
+  - Rust: `"cmd": "cargo build"`
+
+AI checkpoints at natural boundaries:
+- `lint`: after last backend story, after last frontend story, on_complete (standalone: true)
+- `simplify`: after last backend story, after last frontend story, on_complete
 
 ### Output
 Update .gyro/prd.json with the new stories. Preserve any existing stories that

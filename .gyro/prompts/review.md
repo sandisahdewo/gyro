@@ -40,10 +40,6 @@ Use parallel subagents for file reads and code searches. Keep your main context 
 - [ ] Logic actually implements the acceptance criteria, not a shortcut
 - [ ] No reimplementation of functionality that already existed elsewhere in the codebase
 
-### Regression Check
-- [ ] Run ALL quality gates from AGENTS.md — verify they pass
-- [ ] All prior tests must still pass
-
 ### Acceptance Criteria Match
 - [ ] Go through each acceptance criterion one by one
 - [ ] Verify the implementation satisfies each one

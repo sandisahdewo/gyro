@@ -1,0 +1,22 @@
+{
+  "name": "brain",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "gyro": "./bin/gyro.js",
+    "plan-to-gyro": "./bin/plan-to-gyro.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "gyro": "tsx src/index.ts",
+    "convert": "tsx src/convert.ts",
+    "test": "node --experimental-vm-modules node_modules/.bin/vitest run",
+    "test:watch": "node --experimental-vm-modules node_modules/.bin/vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

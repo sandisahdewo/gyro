@@ -42,9 +42,8 @@ You do NOT implement any production logic.
 - It would FAIL if the implementation were wrong or missing
 
 ## When Done
-1. Run the project's test command from AGENTS.md to verify existing tests aren't broken
-2. New tests should FAIL (or not compile/import due to missing implementation) — this is expected and correct
-3. Write a concise summary to `.gyro/state/test-summary.txt`:
+1. New tests should FAIL (or not compile/import due to missing implementation) — this is expected and correct
+2. Write a concise summary to `.gyro/state/test-summary.txt`:
    - List each test written and which acceptance criterion it covers
    - Note which test files were created or modified
 4. If you discovered patterns or gotchas, append to `.gyro/learnings.md`

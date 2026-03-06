@@ -27,11 +27,9 @@ You are a developer. Study your task and implement it.
 - NEVER write tests that assert on `true`, `!= nil`, or `toBeDefined` without checking specific values
 - Every test assertion must check SPECIFIC expected values from the acceptance criteria
 - Capture the WHY in test names and comments — tests document reasoning, not just behavior
-- All prior tests must still pass (regression)
 
 ## When Done
-1. Run ALL quality gates from AGENTS.md. If any fail, fix them before proceeding.
-2. Write a concise summary of what you implemented to `.gyro/state/work-summary.txt`
+1. Write a concise summary of what you implemented to `.gyro/state/work-summary.txt`
 3. Update `PLAN.md` with any discoveries, learnings, or notes for future stories. If it doesn't exist, create it. Keep it brief and useful — not a changelog, but a living document of project state, known issues, and patterns that future iterations should know about.
 4. If you discovered operational learnings (correct commands, gotchas, build quirks), update `AGENTS.md`. Keep it brief (~60 lines max).
 5. If you hit any errors, gotchas, or surprising behavior during this iteration, append a one-liner to `.gyro/learnings.md` so future iterations avoid the same mistake. Format: `- [story-XX/work] what happened and how to avoid it`

@@ -4,6 +4,7 @@
     "test": "claude:sonnet",
     "work": "codex:gpt-5.3-codex",
     "review": "claude:opus",
+    "lint": "claude:haiku",
     "simplify": "claude:sonnet"
   },
   "pipelines": {
@@ -19,12 +20,36 @@
       ],
       "test_lock": {
         "test_cmd": "go test ./...",
+        "test_cmd_file": "go test {files}",
         "file_pattern": "*_test.go",
-        "verify_red": true
+        "verify_red": true,
+        "verify_green": true
       }
     }
   },
   "checkpoints": {
+    "test-all": {
+      "cmd": "go test ./...",
+      "after": "each",
+      "on_complete": true
+    },
+    "type-check": {
+      "cmd": "go vet ./...",
+      "after": "each",
+      "on_complete": true
+    },
+    "build": {
+      "cmd": "go build ./...",
+      "after": "each",
+      "on_complete": true
+    },
+    "lint": {
+      "after": [
+        "story-04"
+      ],
+      "on_complete": true,
+      "standalone": true
+    },
     "simplify": {
       "after": [
         "story-04"

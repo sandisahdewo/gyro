@@ -4,6 +4,7 @@
   "models": {
     "work": "codex:gpt-5.3-codex",
     "review": "claude:opus",
+    "lint": "claude:haiku",
     "simplify": "claude:sonnet"
   },
   "pipelines": {
@@ -13,6 +14,11 @@
     "simplify":     ["simplify", "review"]
   },
   "checkpoints": {
+    "lint": {
+      "after": ["story-05"],
+      "on_complete": true,
+      "standalone": true
+    },
     "simplify": {
       "after": ["story-05"],
       "on_complete": true
