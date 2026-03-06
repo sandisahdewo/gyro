@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
-import type { AgentType, EnvConfig } from "./types.js";
+import type { AgentType, EnvConfig, OnEvent } from "./types.js";
 import { PrdFile } from "./prd.js";
 import { State } from "./state.js";
 import { ProgressTracker } from "./progress.js";
@@ -196,7 +196,7 @@ export function initGitIfNeeded() {
   }
 }
 
-export function runEngine(prd: PrdFile, state: State, config: EngineConfig) {
+export function runEngine(prd: PrdFile, state: State, config: EngineConfig, onEvent?: OnEvent) {
   const tracker = new ProgressTracker();
 
   // Banner
@@ -225,7 +225,7 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig) {
 
       // Run on_complete checkpoints
       for (const cpName of prd.getOnCompleteCheckpoints()) {
-        runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile);
+        runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile, onEvent);
       }
 
       // Stop environment
@@ -238,6 +238,13 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig) {
       tracker.showTotalUsage();
       console.log(`${DIM}Log: .gyro/gyro.log${NC}`);
       console.log(`${DIM}Progress: ${config.progressFile}${NC}`);
+
+      onEvent?.({
+        type: "engine_complete",
+        duration: elapsed,
+        progress: { passed: prd.countPassed(), total: prd.countStories() },
+      });
+
       return;
     }
 
@@ -252,6 +259,16 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig) {
     state.setCurrentStory(story.id);
     tracker.resetStory();
 
+    onEvent?.({
+      type: "story_start",
+      storyId: story.id,
+      title: story.title,
+      attempt: 1,
+      maxRetries: config.maxRetries,
+      steps,
+      progress: { passed: prd.countPassed(), total: prd.countStories() },
+    });
+
     const storyStart = Date.now();
     const result = runStoryPipeline(
       story.id,
@@ -259,7 +276,8 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig) {
       state,
       config.defaultAgent,
       tracker,
-      config.maxRetries
+      config.maxRetries,
+      onEvent
     );
 
     const storyElapsed = Math.floor((Date.now() - storyStart) / 1000);
@@ -278,6 +296,14 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig) {
       tracker.showStoryUsage();
       prd.markStoryPassed(story.id);
 
+      onEvent?.({
+        type: "story_ship",
+        storyId: story.id,
+        attempt: 1,
+        duration: storyElapsed,
+        progress: { passed: prd.countPassed(), total: prd.countStories() },
+      });
+
       // Append to progress
       appendFileSync(
         config.progressFile,
@@ -289,7 +315,7 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig) {
       if (prd.hasCheckpoints()) {
         for (const cpName of prd.getCheckpointNames()) {
           if (prd.shouldRunCheckpointAfter(story.id, cpName)) {
-            runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile);
+            runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile, onEvent);
           }
         }
       }
@@ -298,6 +324,14 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig) {
       fail(`${story.id} FAILED after ${config.maxRetries} attempts (${formatDuration(storyElapsed)})`);
       tracker.showStoryUsage();
       tracker.showTotalUsage();
+
+      onEvent?.({
+        type: "story_fail",
+        storyId: story.id,
+        error: state.getReviewFeedback() ?? "Max retries exhausted",
+        attempts: config.maxRetries,
+      });
+
       fail("Last review feedback:");
       console.log(state.getReviewFeedback() ?? "(none)");
       console.log("");

@@ -1,6 +1,6 @@
 import { execSync } from "child_process";
 import { readFileSync, existsSync } from "fs";
-import type { AgentType, TokenUsage } from "./types.js";
+import type { AgentType, TokenUsage, OnEvent } from "./types.js";
 import { PrdFile } from "./prd.js";
 import { State } from "./state.js";
 import { resolveModel, buildCommand } from "./agents/resolve.js";
@@ -117,7 +117,8 @@ export function runStoryPipeline(
   state: State,
   defaultAgent: AgentType,
   tracker: ProgressTracker,
-  maxRetries: number
+  maxRetries: number,
+  onEvent?: OnEvent
 ): PipelineResult {
   const story = prd.getStory(storyId)!;
   const steps = prd.getStoryPipelineSteps(storyId);
@@ -143,9 +144,24 @@ export function runStoryPipeline(
         continue;
       }
 
+      onEvent?.({
+        type: "step_start",
+        storyId,
+        step,
+        attempt,
+      });
+
       const stepStart = Date.now();
       const outcome = runStep(step, prd, state, defaultAgent, tracker);
       const stepElapsed = Math.floor((Date.now() - stepStart) / 1000);
+
+      onEvent?.({
+        type: "step_complete",
+        storyId,
+        step,
+        duration: stepElapsed,
+        usage: outcome.usage,
+      });
 
       if (!outcome.success) {
         warn(`  [${step}] Step crashed -- treating as REVISE (${formatDuration(stepElapsed)})`);
@@ -156,9 +172,17 @@ export function runStoryPipeline(
       log(`  [${step}] Done (${formatDuration(stepElapsed)})`);
 
       // Run post-step gates
-      if (!runPostStepGate(state, testLock, e2e, step)) {
-        warn(`  [${step}] Gate failed -- treating as REVISE`);
+      const gatePassed = runPostStepGate(state, testLock, e2e, step);
+      if (!gatePassed) {
         const feedback = state.getReviewFeedback();
+        onEvent?.({
+          type: "gate_result",
+          storyId,
+          gate: step,
+          passed: false,
+          message: feedback ?? undefined,
+        });
+        warn(`  [${step}] Gate failed -- treating as REVISE`);
         if (feedback) {
           console.log(`${DIM}${feedback.split("\n").slice(0, 20).join("\n")}${NC}`);
         }
@@ -166,6 +190,13 @@ export function runStoryPipeline(
         state.clearCompletedSteps(storyId);
         break;
       }
+
+      onEvent?.({
+        type: "gate_result",
+        storyId,
+        gate: step,
+        passed: true,
+      });
 
       state.markStepCompleted(storyId, step);
 

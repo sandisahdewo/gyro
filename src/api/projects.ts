@@ -1,13 +1,15 @@
 import { Router, type Request, type Response } from "express";
 import type { ProjectManager } from "../project-manager.js";
 import type { ExecutionQueue } from "../queue.js";
+import type { EventBus } from "../event-bus.js";
+import type { ProgressEvent } from "../types.js";
 
 function paramId(req: Request): string {
   const id = req.params.id;
   return Array.isArray(id) ? id[0] : id;
 }
 
-export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue): Router {
+export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, eventBus?: EventBus): Router {
   const router = Router();
 
   // List all projects
@@ -145,6 +147,72 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue): 
   // Get queue status
   router.get("/_queue", (_req: Request, res: Response) => {
     res.json(queue.getStatus());
+  });
+
+  // SSE event stream
+  router.get("/:id/events", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const project = pm.getProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    if (!eventBus) {
+      res.status(501).json({ error: "event streaming not available" });
+      return;
+    }
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+
+    // Send buffered events (catch-up)
+    const lastEventId = req.headers["last-event-id"] as string | undefined;
+    const recent = eventBus.getRecentEvents(projectId, lastEventId);
+    for (const event of recent) {
+      res.write(`id: ${event.timestamp}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+    }
+
+    // Stream new events
+    const onProgress = (event: ProgressEvent) => {
+      if (event.projectId === projectId) {
+        res.write(`id: ${event.timestamp}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      }
+    };
+
+    eventBus.on("progress", onProgress);
+
+    req.on("close", () => {
+      eventBus.removeListener("progress", onProgress);
+    });
+  });
+
+  // Execution status snapshot
+  router.get("/:id/status", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const project = pm.getProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const liveStatus = eventBus?.getStatus(projectId);
+    if (liveStatus) {
+      res.json(liveStatus);
+      return;
+    }
+
+    // Fallback to ProjectManager data
+    const progress = pm.refreshProgress(projectId);
+    res.json({
+      projectId,
+      running: project.status === "running" || project.status === "converting",
+      progress: progress ?? project.progress,
+      storyId: progress?.currentStory ?? project.currentStory,
+    });
   });
 
   return router;

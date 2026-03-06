@@ -13,6 +13,15 @@ function sendStatus(status: string) {
   }
 }
 
+function sendEvent(projectId: string, event: Record<string, unknown>) {
+  if (process.send) {
+    process.send({
+      type: "progress_event",
+      event: { ...event, projectId, timestamp: new Date().toISOString() },
+    });
+  }
+}
+
 async function run() {
   const projectId = process.env.GYRO_PROJECT_ID!;
   const techStack = process.env.GYRO_TECH_STACK ?? "";
@@ -84,7 +93,7 @@ async function run() {
     defaultAgent,
     prdPath,
     progressFile,
-  });
+  }, (event: Record<string, unknown>) => sendEvent(projectId, event));
 }
 
 run().catch((err) => {

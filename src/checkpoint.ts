@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync } from "fs";
 import { execSync } from "child_process";
-import type { AgentType } from "./types.js";
+import type { AgentType, OnEvent } from "./types.js";
 import { PrdFile } from "./prd.js";
 import { State } from "./state.js";
 import { ProgressTracker } from "./progress.js";
@@ -15,19 +15,26 @@ export function runCheckpoint(
   defaultAgent: AgentType,
   tracker: ProgressTracker,
   maxRetries: number,
-  progressFile: string
+  progressFile: string,
+  onEvent?: OnEvent
 ) {
   const checkpoint = prd.checkpoints[checkpointName];
 
+  onEvent?.({
+    type: "checkpoint_start",
+    checkpoint: checkpointName,
+  });
+
   // Command checkpoint — run the command, auto-fix if it fails
   if (checkpoint?.cmd) {
-    runCommandCheckpoint(checkpointName, checkpoint.cmd, prd, state, defaultAgent, tracker, maxRetries, progressFile);
+    runCommandCheckpoint(checkpointName, checkpoint.cmd, prd, state, defaultAgent, tracker, maxRetries, progressFile, onEvent);
     return;
   }
 
   const promptFile = `.gyro/prompts/${checkpointName}.md`;
   if (!existsSync(promptFile)) {
     warn(`Checkpoint prompt not found: ${promptFile} -- skipping`);
+    onEvent?.({ type: "checkpoint_complete", checkpoint: checkpointName, passed: false });
     return;
   }
 
@@ -45,11 +52,11 @@ export function runCheckpoint(
   const isStandalone = prd.isStandalone(checkpointName);
 
   if (isStandalone) {
-    runStandaloneCheckpoint(checkpointName, prd, state, defaultAgent, tracker, progressFile);
+    runStandaloneCheckpoint(checkpointName, prd, state, defaultAgent, tracker, progressFile, onEvent);
     return;
   }
 
-  runReviewedCheckpoint(checkpointName, prd, state, defaultAgent, tracker, maxRetries, progressFile);
+  runReviewedCheckpoint(checkpointName, prd, state, defaultAgent, tracker, maxRetries, progressFile, onEvent);
 }
 
 function runCommand(cmd: string): { success: boolean; output: string } {
@@ -81,7 +88,8 @@ function runCommandCheckpoint(
   defaultAgent: AgentType,
   tracker: ProgressTracker,
   maxRetries: number,
-  progressFile: string
+  progressFile: string,
+  onEvent?: OnEvent
 ) {
   hr();
   log(`${BOLD}CHECKPOINT: ${checkpointName}${NC} ${DIM}(${cmd})${NC}`);
@@ -94,6 +102,7 @@ function runCommandCheckpoint(
       progressFile,
       `---\n[checkpoint:${checkpointName}] Passed on ${new Date().toISOString()}\n\n`
     );
+    onEvent?.({ type: "checkpoint_complete", checkpoint: checkpointName, passed: true });
     return;
   }
 
@@ -135,6 +144,7 @@ function runCommandCheckpoint(
         `---\n[checkpoint:${checkpointName}] Passed on ${new Date().toISOString()} (after ${attempt} fix attempt(s))\n\n`
       );
       state.clearReviewFeedback();
+      onEvent?.({ type: "checkpoint_complete", checkpoint: checkpointName, passed: true });
       return;
     }
 
@@ -146,6 +156,7 @@ function runCommandCheckpoint(
 
   warn(`[${checkpointName}] Max retries reached. Continuing anyway.`);
   state.clearReviewFeedback();
+  onEvent?.({ type: "checkpoint_complete", checkpoint: checkpointName, passed: false });
 }
 
 function writeCheckpointScope(checkpointName: string, state: State) {
@@ -178,11 +189,13 @@ function runStandaloneCheckpoint(
   state: State,
   defaultAgent: AgentType,
   tracker: ProgressTracker,
-  progressFile: string
+  progressFile: string,
+  onEvent?: OnEvent
 ) {
   const outcome = runStep(checkpointName, prd, state, defaultAgent, tracker);
   if (!outcome.success) {
     warn(`  [${checkpointName}] Standalone checkpoint crashed`);
+    onEvent?.({ type: "checkpoint_complete", checkpoint: checkpointName, passed: false });
     return;
   }
 
@@ -196,6 +209,7 @@ function runStandaloneCheckpoint(
     `---\n[checkpoint:${checkpointName}] Completed on ${new Date().toISOString()}\n` +
       `${state.getWorkSummary() ?? ""}\n\n`
   );
+  onEvent?.({ type: "checkpoint_complete", checkpoint: checkpointName, passed: true });
 }
 
 function runReviewedCheckpoint(
@@ -205,7 +219,8 @@ function runReviewedCheckpoint(
   defaultAgent: AgentType,
   tracker: ProgressTracker,
   maxRetries: number,
-  progressFile: string
+  progressFile: string,
+  onEvent?: OnEvent
 ) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     log(`  [${checkpointName}] Attempt ${attempt}/${maxRetries}`);
@@ -220,6 +235,7 @@ function runReviewedCheckpoint(
       ok(`  [${checkpointName}] No changes needed -- code is clean`);
       const tag = git.createCheckpointTag(checkpointName);
       log(`  Tagged: ${tag}`);
+      onEvent?.({ type: "checkpoint_complete", checkpoint: checkpointName, passed: true });
       return;
     }
 
@@ -243,6 +259,7 @@ function runReviewedCheckpoint(
         `---\n[checkpoint:${checkpointName}] Completed on ${new Date().toISOString()}\n` +
           `${state.getWorkSummary() ?? ""}\n\n`
       );
+      onEvent?.({ type: "checkpoint_complete", checkpoint: checkpointName, passed: true });
       return;
     }
 
@@ -254,4 +271,5 @@ function runReviewedCheckpoint(
   }
 
   warn(`[${checkpointName}] Max retries reached. Continuing anyway.`);
+  onEvent?.({ type: "checkpoint_complete", checkpoint: checkpointName, passed: false });
 }

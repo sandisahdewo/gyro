@@ -70,3 +70,108 @@ export interface ResolvedModel {
   model: string;
   label: string;
 }
+
+// --- Progress Events ---
+
+interface BaseEvent {
+  projectId: string;
+  timestamp: string;
+}
+
+export interface StoryStartEvent extends BaseEvent {
+  type: "story_start";
+  storyId: string;
+  title: string;
+  attempt: number;
+  maxRetries: number;
+  steps: string[];
+  progress: { passed: number; total: number };
+}
+
+export interface StepStartEvent extends BaseEvent {
+  type: "step_start";
+  storyId: string;
+  step: string;
+  attempt: number;
+}
+
+export interface StepCompleteEvent extends BaseEvent {
+  type: "step_complete";
+  storyId: string;
+  step: string;
+  duration: number;
+  usage?: TokenUsage;
+}
+
+export interface GateResultEvent extends BaseEvent {
+  type: "gate_result";
+  storyId: string;
+  gate: string;
+  passed: boolean;
+  message?: string;
+}
+
+export interface StoryShipEvent extends BaseEvent {
+  type: "story_ship";
+  storyId: string;
+  attempt: number;
+  duration: number;
+  usage?: TokenUsage;
+  progress: { passed: number; total: number };
+}
+
+export interface StoryFailEvent extends BaseEvent {
+  type: "story_fail";
+  storyId: string;
+  error: string;
+  attempts: number;
+}
+
+export interface CheckpointStartEvent extends BaseEvent {
+  type: "checkpoint_start";
+  checkpoint: string;
+  storyId?: string;
+}
+
+export interface CheckpointCompleteEvent extends BaseEvent {
+  type: "checkpoint_complete";
+  checkpoint: string;
+  passed: boolean;
+}
+
+export interface EngineCompleteEvent extends BaseEvent {
+  type: "engine_complete";
+  duration: number;
+  totalUsage?: TokenUsage;
+  progress: { passed: number; total: number };
+}
+
+export type ProgressEvent =
+  | StoryStartEvent
+  | StepStartEvent
+  | StepCompleteEvent
+  | GateResultEvent
+  | StoryShipEvent
+  | StoryFailEvent
+  | CheckpointStartEvent
+  | CheckpointCompleteEvent
+  | EngineCompleteEvent;
+
+type OmitDistributive<T, K extends keyof any> = T extends any ? Omit<T, K> : never;
+
+export type ProgressEventPayload = OmitDistributive<ProgressEvent, "projectId" | "timestamp">;
+
+export type OnEvent = (event: ProgressEventPayload) => void;
+
+export interface ExecutionStatus {
+  projectId: string;
+  running: boolean;
+  storyId?: string;
+  storyTitle?: string;
+  step?: string;
+  attempt?: number;
+  maxRetries?: number;
+  progress?: { passed: number; total: number };
+  startedAt?: string;
+  lastEvent?: string;
+}

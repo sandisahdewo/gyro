@@ -2,6 +2,7 @@ import { fork, type ChildProcess } from "child_process";
 import { join, resolve } from "path";
 import { existsSync, writeFileSync, unlinkSync } from "fs";
 import { ProjectManager } from "./project-manager.js";
+import type { EventBus } from "./event-bus.js";
 
 export interface QueueEntry {
   projectId: string;
@@ -12,9 +13,11 @@ export class ExecutionQueue {
   private running: { projectId: string; process: ChildProcess } | null = null;
   private queue: QueueEntry[] = [];
   private pm: ProjectManager;
+  private eventBus?: EventBus;
 
-  constructor(pm: ProjectManager) {
+  constructor(pm: ProjectManager, eventBus?: EventBus) {
     this.pm = pm;
+    this.eventBus = eventBus;
   }
 
   enqueue(projectId: string, tech?: string): "running" | "queued" {
@@ -99,6 +102,8 @@ export class ExecutionQueue {
     child.on("message", (msg: any) => {
       if (msg.type === "status") {
         this.pm.updateProject(projectId, { status: msg.status });
+      } else if (msg.type === "progress_event" && this.eventBus) {
+        this.eventBus.publish(msg.event);
       }
     });
 
