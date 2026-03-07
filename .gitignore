@@ -10,5 +10,8 @@ test-results/
 # Gyro integration tests
 gyro-test/
 
+# SQLite database
+data/
+
 # Project working directories
 projects/

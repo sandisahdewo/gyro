@@ -1,7 +1,10 @@
 import { appendFileSync, existsSync } from "fs";
 import { execSync } from "child_process";
 import type { AgentType, OnEvent } from "./types.js";
-import { PrdFile } from "./prd.js";
+import type { PrdFile } from "./prd.js";
+import type { DbTaskSource } from "./db-task-source.js";
+
+type TaskSource = PrdFile | DbTaskSource;
 import { State } from "./state.js";
 import { ProgressTracker } from "./progress.js";
 import { runStep } from "./pipeline.js";
@@ -10,7 +13,7 @@ import { log, ok, warn, fail, hr, BOLD, DIM, CYAN, NC } from "./log.js";
 
 export function runCheckpoint(
   checkpointName: string,
-  prd: PrdFile,
+  prd: TaskSource,
   state: State,
   defaultAgent: AgentType,
   tracker: ProgressTracker,
@@ -83,7 +86,7 @@ function runCommand(cmd: string): { success: boolean; output: string } {
 function runCommandCheckpoint(
   checkpointName: string,
   cmd: string,
-  prd: PrdFile,
+  prd: TaskSource,
   state: State,
   defaultAgent: AgentType,
   tracker: ProgressTracker,
@@ -185,7 +188,7 @@ function commitCheckpoint(checkpointName: string, summary: string) {
 
 function runStandaloneCheckpoint(
   checkpointName: string,
-  prd: PrdFile,
+  prd: TaskSource,
   state: State,
   defaultAgent: AgentType,
   tracker: ProgressTracker,
@@ -214,7 +217,7 @@ function runStandaloneCheckpoint(
 
 function runReviewedCheckpoint(
   checkpointName: string,
-  prd: PrdFile,
+  prd: TaskSource,
   state: State,
   defaultAgent: AgentType,
   tracker: ProgressTracker,

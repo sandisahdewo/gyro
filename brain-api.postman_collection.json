@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Brain API",
-    "description": "Brain - AI Task Execution Engine API",
+    "description": "Brain - AI Task Execution Engine API\n\nFlow: Create project → Create epic → Implement epic (AI decomposes into tasks) → Engine auto-executes",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -12,6 +12,10 @@
     {
       "key": "projectId",
       "value": "my-project"
+    },
+    {
+      "key": "epicId",
+      "value": "epic-01"
     }
   ],
   "item": [
@@ -23,105 +27,278 @@
       }
     },
     {
-      "name": "List Projects",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/projects"
-      }
-    },
-    {
-      "name": "Create Project",
-      "request": {
-        "method": "POST",
-        "url": "{{baseUrl}}/projects",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+      "name": "Projects",
+      "item": [
+        {
+          "name": "List Projects",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects"
           }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"name\": \"my-project\",\n  \"plan\": \"# My Project\\n\\n## Stories\\n\\n### Story 1: Hello World\\n- Create a simple hello world app\",\n  \"tech\": \"node\"\n}"
-        }
-      }
-    },
-    {
-      "name": "Register Existing Project",
-      "request": {
-        "method": "POST",
-        "url": "{{baseUrl}}/projects/register",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+        },
+        {
+          "name": "Create Project",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"my-project\",\n  \"dir\": \"/tmp/my-project\",\n  \"tech\": \"node\"\n}"
+            }
           }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"name\": \"existing-project\",\n  \"dir\": \"/home/ubuntu/code/existing-project\",\n  \"plan\": \"# Existing Project Plan\\n\\n## Stories\\n\\n### Story 1: Add feature\\n- Add a new feature\",\n  \"tech\": \"node\"\n}"
-        }
-      }
-    },
-    {
-      "name": "Get Project Details",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/projects/{{projectId}}"
-      }
-    },
-    {
-      "name": "Start Execution",
-      "request": {
-        "method": "POST",
-        "url": "{{baseUrl}}/projects/{{projectId}}/run"
-      }
-    },
-    {
-      "name": "Stop Execution",
-      "request": {
-        "method": "POST",
-        "url": "{{baseUrl}}/projects/{{projectId}}/stop"
-      }
-    },
-    {
-      "name": "Get Execution Status",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/projects/{{projectId}}/status"
-      }
-    },
-    {
-      "name": "SSE Event Stream",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/projects/{{projectId}}/events",
-        "description": "Server-Sent Events stream. In Postman, use 'Send and Download' or test via curl: curl -N {{baseUrl}}/projects/{{projectId}}/events"
-      }
-    },
-    {
-      "name": "Add Task to Project",
-      "request": {
-        "method": "POST",
-        "url": "{{baseUrl}}/projects/{{projectId}}/tasks",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+        },
+        {
+          "name": "Create Project (with template override)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"my-frontend\",\n  \"dir\": \"/tmp/my-frontend\",\n  \"tech\": \"node\",\n  \"template\": \"frontend\"\n}"
+            }
           }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"title\": \"Change greeting to Hello Sandi\",\n  \"pipeline\": \"setup\",\n  \"acceptance_criteria\": [\n    \"The app displays 'Hello Sandi' instead of 'Hello World'\",\n    \"No other functionality is broken\"\n  ]\n}"
+        },
+        {
+          "name": "Register Existing Project",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/register",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"existing-project\",\n  \"dir\": \"/home/ubuntu/code/existing-project\",\n  \"tech\": \"node\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Project Details",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}"
+          }
+        },
+        {
+          "name": "Get Project Config",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}/config"
+          }
+        },
+        {
+          "name": "Update Project Config",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/projects/{{projectId}}/config",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"models\": {\n    \"test\": \"claude:sonnet\",\n    \"work\": \"claude:sonnet\",\n    \"review\": \"claude:opus\",\n    \"fix\": \"claude:sonnet\",\n    \"lint\": \"claude:haiku\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Partial merge — only send the fields you want to change. Omitted fields keep their current values."
+          }
         }
-      }
+      ]
     },
     {
-      "name": "Queue Status",
-      "request": {
-        "method": "GET",
-        "url": "{{baseUrl}}/projects/_queue"
-      }
+      "name": "Epics",
+      "item": [
+        {
+          "name": "Create Epic",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"User authentication\",\n  \"description\": \"Implement user auth with email/password signup, login, JWT tokens, and OAuth support for Gmail and GitHub.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "List Epics",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics"
+          }
+        },
+        {
+          "name": "Update Epic",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Implement user auth with email/password signup and login. Use JWT for session tokens. Add OAuth for Gmail and GitHub. Include email validation on signup.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Implement Epic (decompose + execute)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/implement",
+            "description": "AI decomposes the epic into executable tasks, auto-classifies pipelines, and inserts them into the DB. The engine auto-picks them up — no /run needed."
+          }
+        },
+        {
+          "name": "Retry Failed Epic",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/retry",
+            "description": "Resets all failed tasks in the epic back to pending so the engine picks them up again."
+          }
+        },
+        {
+          "name": "Stop Epic",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/stop",
+            "description": "Stops all pending/running tasks in the epic. Kills the worker if a task from this epic is currently running."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tasks",
+      "item": [
+        {
+          "name": "List Tasks",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}/tasks"
+          }
+        },
+        {
+          "name": "Add Task Directly",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/tasks",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Add health check endpoint\",\n  \"pipeline\": \"backend-tdd\",\n  \"acceptance_criteria\": [\n    \"GET /health returns 200 with {status: 'ok'}\",\n    \"Response includes server uptime in seconds\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Add Task to Epic",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/tasks",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Add password reset flow\",\n  \"pipeline\": \"backend-tdd\",\n  \"acceptance_criteria\": [\n    \"POST /auth/forgot-password sends reset email\",\n    \"POST /auth/reset-password with valid token changes password\"\n  ],\n  \"epic_id\": \"epic-01\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Retry Failed Task",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/tasks/task-01/retry",
+            "description": "Resets a single failed task back to pending so the engine picks it up again."
+          }
+        },
+        {
+          "name": "Stop Task",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/tasks/task-01/stop",
+            "description": "Stops a pending or running task. Kills the worker if this task is currently running."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Execution",
+      "item": [
+        {
+          "name": "Priority Boost (Run Project)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/run",
+            "description": "Boosts priority of all pending tasks for this project so they get picked up next by the engine."
+          }
+        },
+        {
+          "name": "Stop Execution",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/stop"
+          }
+        },
+        {
+          "name": "Get Execution Status",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}/status"
+          }
+        },
+        {
+          "name": "Engine Status",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/_queue"
+          }
+        },
+        {
+          "name": "SSE Event Stream",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}/events",
+            "description": "Server-Sent Events stream. In Postman, use 'Send and Download' or test via curl: curl -N {{baseUrl}}/projects/{{projectId}}/events"
+          }
+        }
+      ]
     }
   ]
 }

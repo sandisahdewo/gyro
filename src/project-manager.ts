@@ -1,13 +1,15 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, cpSync } from "fs";
 import { join, resolve } from "path";
-import type { PRD } from "./types.js";
+import type Database from "better-sqlite3";
+import type { DbProject } from "./db.js";
+import * as db from "./db.js";
+import { getTemplate } from "./templates.js";
 
 export interface Project {
   id: string;
   name: string;
   status: "created" | "converting" | "running" | "completed" | "failed" | "stopped";
   dir: string;
-  plan?: string;
   tech?: string;
   createdAt: string;
   updatedAt: string;
@@ -16,32 +18,24 @@ export interface Project {
   currentStory?: string;
 }
 
-const PROJECTS_FILE = "projects.json";
+function dbToProject(row: DbProject): Project {
+  return {
+    id: row.id,
+    name: row.name,
+    status: row.status as Project["status"],
+    dir: row.dir,
+    tech: row.tech ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    error: row.error ?? undefined,
+  };
+}
 
 export class ProjectManager {
-  private baseDir: string;
-  private projects: Map<string, Project> = new Map();
+  private database: Database.Database;
 
-  constructor(baseDir: string = "projects") {
-    this.baseDir = resolve(baseDir);
-    mkdirSync(this.baseDir, { recursive: true });
-    this.load();
-  }
-
-  private stateFile(): string {
-    return join(this.baseDir, PROJECTS_FILE);
-  }
-
-  private load() {
-    const file = this.stateFile();
-    if (existsSync(file)) {
-      const data: Project[] = JSON.parse(readFileSync(file, "utf-8"));
-      for (const p of data) this.projects.set(p.id, p);
-    }
-  }
-
-  private save() {
-    writeFileSync(this.stateFile(), JSON.stringify([...this.projects.values()], null, 2) + "\n");
+  constructor(database: Database.Database) {
+    this.database = database;
   }
 
   private slugify(name: string): string {
@@ -51,58 +45,35 @@ export class ProjectManager {
       .replace(/^-|-$/g, "");
   }
 
-  createProject(name: string, plan: string, tech?: string): Project {
+  createProject(name: string, dir: string, tech?: string, templateOverride?: string): Project {
     const id = this.slugify(name);
-    if (this.projects.has(id)) {
+    if (db.getProject(this.database, id)) {
       throw new Error(`Project "${id}" already exists`);
     }
 
-    const dir = join(this.baseDir, id);
-    mkdirSync(dir, { recursive: true });
+    const template = getTemplate(tech, templateOverride);
+    const resolvedDir = resolve(dir);
 
-    // Save plan
-    writeFileSync(join(dir, "plan.md"), plan);
+    mkdirSync(resolvedDir, { recursive: true });
 
     // Copy default prompts
-    this.copyPrompts(dir);
+    this.copyPrompts(resolvedDir);
 
-    const now = new Date().toISOString();
-    const project: Project = {
-      id,
-      name,
-      status: "created",
-      dir,
-      plan,
-      tech,
-      createdAt: now,
-      updatedAt: now,
-    };
+    const project = db.createProject(this.database, id, name, resolvedDir, tech, template.default_pipeline);
+    db.setProjectConfig(this.database, id, template);
 
-    this.projects.set(id, project);
-    this.save();
-    return project;
+    return dbToProject(project);
   }
 
-  /**
-   * Register an existing project directory.
-   * The directory must exist. If it has a prd.json, progress is read from it.
-   * If it has a plan.md but no prd.json, conversion will happen on /run.
-   * If plan is provided, it overwrites the existing plan.md (useful for adding new stories).
-   */
-  registerProject(name: string, dir: string, opts?: { plan?: string; tech?: string }): Project {
+  registerProject(name: string, dir: string, opts?: { tech?: string; templateOverride?: string }): Project {
     const resolvedDir = resolve(dir);
     if (!existsSync(resolvedDir)) {
       throw new Error(`Directory not found: ${resolvedDir}`);
     }
 
     const id = this.slugify(name);
-    if (this.projects.has(id)) {
+    if (db.getProject(this.database, id)) {
       throw new Error(`Project "${id}" already exists`);
-    }
-
-    // Write plan if provided
-    if (opts?.plan) {
-      writeFileSync(join(resolvedDir, "plan.md"), opts.plan);
     }
 
     // Copy prompts only if .gyro/prompts doesn't exist yet
@@ -111,43 +82,11 @@ export class ProjectManager {
       this.copyPrompts(resolvedDir);
     }
 
-    // Determine initial status from existing state
-    const prdPath = join(resolvedDir, ".gyro", "prd.json");
-    const hasPrd = existsSync(prdPath);
-    const hasPlan = existsSync(join(resolvedDir, "plan.md"));
-    let status: Project["status"] = "created";
-    let progress: { passed: number; total: number } | undefined;
+    const template = getTemplate(opts?.tech, opts?.templateOverride);
+    const project = db.createProject(this.database, id, name, resolvedDir, opts?.tech, template.default_pipeline);
+    db.setProjectConfig(this.database, id, template);
 
-    if (hasPrd) {
-      try {
-        const prd: PRD = JSON.parse(readFileSync(prdPath, "utf-8"));
-        const total = prd.stories.length;
-        const passed = prd.stories.filter((s) => s.passes).length;
-        progress = { passed, total };
-        // If all passed, mark as completed
-        status = passed === total ? "completed" : "created";
-      } catch {}
-    }
-
-    if (!hasPrd && !hasPlan && !opts?.plan) {
-      throw new Error(`Directory has no plan.md or .gyro/prd.json: ${resolvedDir}`);
-    }
-
-    const now = new Date().toISOString();
-    const project: Project = {
-      id,
-      name,
-      status,
-      dir: resolvedDir,
-      tech: opts?.tech,
-      createdAt: now,
-      updatedAt: now,
-      progress,
-    };
-
-    this.projects.set(id, project);
-    this.save();
-    return project;
+    return dbToProject(project);
   }
 
   private copyPrompts(projectDir: string) {
@@ -169,43 +108,41 @@ export class ProjectManager {
   }
 
   getProject(id: string): Project | undefined {
-    return this.projects.get(id);
+    const row = db.getProject(this.database, id);
+    if (!row) return undefined;
+    const project = dbToProject(row);
+
+    // Add progress from tasks
+    const progress = db.getTaskProgress(this.database, id);
+    if (progress.total > 0) {
+      project.progress = { passed: progress.shipped, total: progress.total };
+    }
+
+    return project;
   }
 
   listProjects(): Project[] {
-    return [...this.projects.values()];
+    return db.listProjects(this.database).map((row) => {
+      const project = dbToProject(row);
+      const progress = db.getTaskProgress(this.database, row.id);
+      if (progress.total > 0) {
+        project.progress = { passed: progress.shipped, total: progress.total };
+      }
+      return project;
+    });
   }
 
-  updateProject(id: string, updates: Partial<Project>) {
-    const project = this.projects.get(id);
-    if (!project) throw new Error(`Project "${id}" not found`);
-    Object.assign(project, updates, { updatedAt: new Date().toISOString() });
-    this.save();
+  updateProject(id: string, updates: Partial<Pick<Project, "status" | "error" | "name">>) {
+    db.updateProject(this.database, id, updates as any);
   }
 
-  /** Read current progress from the project's prd.json */
   refreshProgress(id: string): { passed: number; total: number; currentStory?: string } | undefined {
-    const project = this.projects.get(id);
+    const project = db.getProject(this.database, id);
     if (!project) return undefined;
 
-    const prdPath = join(project.dir, ".gyro", "prd.json");
-    if (!existsSync(prdPath)) return undefined;
+    const progress = db.getTaskProgress(this.database, id);
+    if (progress.total === 0) return undefined;
 
-    try {
-      const prd: PRD = JSON.parse(readFileSync(prdPath, "utf-8"));
-      const total = prd.stories.length;
-      const passed = prd.stories.filter((s) => s.passes).length;
-
-      // Read current story from state
-      const storyFile = join(project.dir, ".gyro", "state", "current-story.txt");
-      const currentStory = existsSync(storyFile)
-        ? readFileSync(storyFile, "utf-8").trim()
-        : undefined;
-
-      this.updateProject(id, { progress: { passed, total }, currentStory });
-      return { passed, total, currentStory };
-    } catch {
-      return undefined;
-    }
+    return { passed: progress.shipped, total: progress.total };
   }
 }

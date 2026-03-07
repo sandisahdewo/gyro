@@ -63,6 +63,8 @@ export interface StepResult {
   usage?: TokenUsage;
 }
 
+export type TaskStatus = "pending" | "running" | "shipped" | "failed";
+
 export type AgentType = "claude" | "codex";
 
 export interface ResolvedModel {

@@ -1,18 +1,23 @@
 import { Router, type Request, type Response } from "express";
-import { existsSync } from "fs";
-import { join } from "path";
+import type Database from "better-sqlite3";
 import type { ProjectManager } from "../project-manager.js";
-import type { ExecutionQueue } from "../queue.js";
+import type { EngineLoop } from "../engine-loop.js";
 import type { EventBus } from "../event-bus.js";
-import type { ProgressEvent, Story } from "../types.js";
-import { PrdFile } from "../prd.js";
+import type { ProgressEvent } from "../types.js";
+import * as db from "../db.js";
+import { decompose } from "../decomposer.js";
 
 function paramId(req: Request): string {
   const id = req.params.id;
   return Array.isArray(id) ? id[0] : id;
 }
 
-export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, eventBus?: EventBus): Router {
+function paramEpicId(req: Request): string {
+  const id = req.params.epicId;
+  return Array.isArray(id) ? id[0] : id;
+}
+
+export function createProjectRouter(pm: ProjectManager, engineLoop: EngineLoop, eventBus: EventBus, database: Database.Database): Router {
   const router = Router();
 
   // List all projects
@@ -24,32 +29,36 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
       progress: p.progress,
-      currentStory: p.currentStory,
     }));
     res.json({ projects });
   });
 
   // Create a project
   router.post("/", (req: Request, res: Response) => {
-    const { name, plan, tech } = req.body;
+    const { name, dir, tech, template } = req.body;
 
     if (!name || typeof name !== "string") {
       res.status(400).json({ error: "name is required" });
       return;
     }
-    if (!plan || typeof plan !== "string") {
-      res.status(400).json({ error: "plan is required (markdown content)" });
+    if (!dir || typeof dir !== "string") {
+      res.status(400).json({ error: "dir is required (path to project directory)" });
       return;
     }
 
     try {
-      const project = pm.createProject(name, plan, tech);
+      const project = pm.createProject(name, dir, tech, template);
+      const config = db.getProjectConfig(database, project.id);
       res.status(201).json({
         id: project.id,
         name: project.name,
         status: project.status,
         dir: project.dir,
         createdAt: project.createdAt,
+        config: config ? {
+          pipelines: Object.keys(config.pipelines),
+          default_pipeline: project.status,
+        } : undefined,
       });
     } catch (err: any) {
       res.status(409).json({ error: err.message });
@@ -58,7 +67,7 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
 
   // Register an existing project directory
   router.post("/register", (req: Request, res: Response) => {
-    const { name, dir, plan, tech } = req.body;
+    const { name, dir, tech, template } = req.body;
 
     if (!name || typeof name !== "string") {
       res.status(400).json({ error: "name is required" });
@@ -70,7 +79,7 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
     }
 
     try {
-      const project = pm.registerProject(name, dir, { plan, tech });
+      const project = pm.registerProject(name, dir, { tech, templateOverride: template });
       res.status(201).json({
         id: project.id,
         name: project.name,
@@ -92,7 +101,6 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
       return;
     }
 
-    // Refresh progress from disk
     const progress = pm.refreshProgress(project.id);
 
     res.json({
@@ -104,12 +112,401 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
       progress: progress ?? project.progress,
-      currentStory: progress?.currentStory ?? project.currentStory,
       error: project.error,
     });
   });
 
-  // Start execution
+  // Get project config
+  router.get("/:id/config", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    if (!pm.getProject(projectId)) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const config = db.getProjectConfig(database, projectId);
+    if (!config) {
+      res.status(404).json({ error: "no config found for project" });
+      return;
+    }
+
+    res.json({
+      project_id: config.project_id,
+      pipelines: config.pipelines,
+      models: config.models,
+      checkpoints: config.checkpoints,
+      env: config.env,
+      work_branches: !!config.work_branches,
+    });
+  });
+
+  // Update project config (partial merge)
+  router.patch("/:id/config", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    if (!pm.getProject(projectId)) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const existing = db.getProjectConfig(database, projectId);
+    if (!existing) {
+      res.status(404).json({ error: "no config found for project" });
+      return;
+    }
+
+    const { pipelines, models, checkpoints, env, work_branches } = req.body;
+
+    const merged = {
+      pipelines: pipelines ?? existing.pipelines,
+      models: models ?? existing.models ?? {},
+      checkpoints: checkpoints ?? existing.checkpoints ?? {},
+      default_pipeline: Object.keys(pipelines ?? existing.pipelines)[0] ?? "setup",
+    };
+
+    db.setProjectConfig(
+      database,
+      projectId,
+      merged,
+      env !== undefined ? env : existing.env ?? undefined,
+      work_branches !== undefined ? !!work_branches : !!existing.work_branches,
+    );
+
+    const updated = db.getProjectConfig(database, projectId)!;
+    res.json({
+      project_id: updated.project_id,
+      pipelines: updated.pipelines,
+      models: updated.models,
+      checkpoints: updated.checkpoints,
+      env: updated.env,
+      work_branches: !!updated.work_branches,
+    });
+  });
+
+  // --- Epics ---
+
+  // Create epic
+  router.post("/:id/epics", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const project = pm.getProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const { title, description } = req.body;
+    if (!title || typeof title !== "string") {
+      res.status(400).json({ error: "title is required" });
+      return;
+    }
+    if (!description || typeof description !== "string") {
+      res.status(400).json({ error: "description is required" });
+      return;
+    }
+
+    try {
+      const epic = db.createEpic(database, projectId, title, description);
+      res.status(201).json(epic);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // List epics
+  router.get("/:id/epics", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const project = pm.getProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const epics = db.listEpics(database, projectId).map((epic) => {
+      const progress = db.getEpicProgress(database, projectId, epic.id);
+      return { ...epic, progress };
+    });
+    res.json({ epics });
+  });
+
+  // Update epic
+  router.patch("/:id/epics/:epicId", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const epicId = paramEpicId(req);
+
+    const epic = db.getEpic(database, projectId, epicId);
+    if (!epic) {
+      res.status(404).json({ error: "epic not found" });
+      return;
+    }
+
+    const { title, description, status } = req.body;
+    const now = new Date().toISOString();
+
+    const sets: string[] = ["updated_at = ?"];
+    const values: unknown[] = [now];
+
+    if (title) { sets.push("title = ?"); values.push(title); }
+    if (description) { sets.push("description = ?"); values.push(description); }
+    if (status) { sets.push("status = ?"); values.push(status); }
+
+    values.push(projectId, epicId);
+    database.prepare(`UPDATE epics SET ${sets.join(", ")} WHERE project_id = ? AND id = ?`).run(...values);
+
+    const updated = db.getEpic(database, projectId, epicId);
+    res.json(updated);
+  });
+
+  // Implement epic (decompose + create tasks)
+  router.post("/:id/epics/:epicId/implement", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const epicId = paramEpicId(req);
+
+    const project = pm.getProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const epic = db.getEpic(database, projectId, epicId);
+    if (!epic) {
+      res.status(404).json({ error: "epic not found" });
+      return;
+    }
+
+    const config = db.getProjectConfig(database, projectId);
+    if (!config) {
+      res.status(500).json({ error: "project has no config" });
+      return;
+    }
+
+    try {
+      // Decompose epic into tasks
+      db.updateEpicStatus(database, projectId, epicId, "planning");
+      const decomposed = decompose(epic.title, epic.description, config);
+
+      // Get existing task count for id generation
+      const existingTasks = db.listTasks(database, projectId);
+      const maxNum = existingTasks.reduce((max, t) => {
+        const match = t.id.match(/task-(\d+)/);
+        return match ? Math.max(max, parseInt(match[1])) : max;
+      }, 0);
+
+      const createdTasks: db.DbTask[] = [];
+      for (let i = 0; i < decomposed.length; i++) {
+        const d = decomposed[i];
+        const taskId = `task-${String(maxNum + i + 1).padStart(2, "0")}`;
+        const task = db.createTask(database, projectId, {
+          id: taskId,
+          title: d.title,
+          pipeline: d.pipeline,
+          acceptance_criteria: d.acceptance_criteria,
+          priority: d.priority,
+          epic_id: epicId,
+        });
+        createdTasks.push(task);
+      }
+
+      db.updateEpicStatus(database, projectId, epicId, "implementing");
+
+      db.logEvent(database, {
+        project_id: projectId,
+        epic_id: epicId,
+        type: "epic_decomposed",
+        payload: { taskCount: createdTasks.length },
+      });
+
+      res.status(201).json({
+        epic: db.getEpic(database, projectId, epicId),
+        tasks: createdTasks,
+      });
+    } catch (err: any) {
+      db.updateEpicStatus(database, projectId, epicId, "failed");
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Tasks ---
+
+  // Add a task directly
+  router.post("/:id/tasks", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const project = pm.getProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const { title, pipeline, acceptance_criteria, plan_ref, epic_id } = req.body;
+
+    if (!title || typeof title !== "string") {
+      res.status(400).json({ error: "title is required" });
+      return;
+    }
+    if (!acceptance_criteria || !Array.isArray(acceptance_criteria) || acceptance_criteria.length === 0) {
+      res.status(400).json({ error: "acceptance_criteria is required (non-empty array)" });
+      return;
+    }
+
+    try {
+      const existingTasks = db.listTasks(database, projectId);
+      const maxPriority = existingTasks.reduce((max, t) => Math.max(max, t.priority), 0);
+      const maxNum = existingTasks.reduce((max, t) => {
+        const match = t.id.match(/(?:story|task)-(\d+)/);
+        return match ? Math.max(max, parseInt(match[1])) : max;
+      }, 0);
+
+      const taskId = `task-${String(maxNum + 1).padStart(2, "0")}`;
+      const task = db.createTask(database, projectId, {
+        id: taskId,
+        title,
+        pipeline: pipeline || "setup",
+        acceptance_criteria,
+        priority: maxPriority + 1,
+        epic_id,
+        plan_ref,
+      });
+
+      res.status(201).json(task);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // List tasks
+  router.get("/:id/tasks", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const project = pm.getProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const tasks = db.listTasks(database, projectId);
+    res.json({ tasks });
+  });
+
+  // Retry a single failed task
+  router.post("/:id/tasks/:taskId/retry", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const taskId = req.params.taskId;
+    if (!pm.getProject(projectId)) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const task = db.getTask(database, projectId, Array.isArray(taskId) ? taskId[0] : taskId);
+    if (!task) {
+      res.status(404).json({ error: "task not found" });
+      return;
+    }
+    if (task.status !== "failed") {
+      res.status(409).json({ error: `task status is '${task.status}', only failed tasks can be retried` });
+      return;
+    }
+
+    db.updateTaskStatus(database, projectId, task.id, "pending");
+    res.json({ status: "retrying", task: db.getTask(database, projectId, task.id) });
+  });
+
+  // Retry all failed tasks in an epic
+  router.post("/:id/epics/:epicId/retry", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const epicId = paramEpicId(req);
+    if (!pm.getProject(projectId)) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const epic = db.getEpic(database, projectId, epicId);
+    if (!epic) {
+      res.status(404).json({ error: "epic not found" });
+      return;
+    }
+
+    const tasks = db.listTasksByEpic(database, projectId, epicId);
+    const failed = tasks.filter((t) => t.status === "failed");
+    if (failed.length === 0) {
+      res.status(409).json({ error: "no failed tasks to retry" });
+      return;
+    }
+
+    for (const task of failed) {
+      db.updateTaskStatus(database, projectId, task.id, "pending");
+    }
+    db.updateEpicStatus(database, projectId, epicId, "implementing");
+
+    res.json({ status: "retrying", retriedCount: failed.length, epicId });
+  });
+
+  // Stop a single task (cancel if running, or pull from pending)
+  router.post("/:id/tasks/:taskId/stop", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const taskId = req.params.taskId;
+    if (!pm.getProject(projectId)) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const tid = Array.isArray(taskId) ? taskId[0] : taskId;
+    const task = db.getTask(database, projectId, tid);
+    if (!task) {
+      res.status(404).json({ error: "task not found" });
+      return;
+    }
+
+    if (task.status === "shipped") {
+      res.status(409).json({ error: "task already shipped" });
+      return;
+    }
+
+    // Kill the worker if this task is currently running
+    engineLoop.stopTask(projectId, tid);
+
+    db.updateTaskStatus(database, projectId, tid, "failed", "stopped by user");
+    res.json({ status: "stopped", task: db.getTask(database, projectId, tid) });
+  });
+
+  // Stop an epic (cancel running task if it belongs to this epic, mark remaining pending as failed)
+  router.post("/:id/epics/:epicId/stop", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const epicId = paramEpicId(req);
+    if (!pm.getProject(projectId)) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const epic = db.getEpic(database, projectId, epicId);
+    if (!epic) {
+      res.status(404).json({ error: "epic not found" });
+      return;
+    }
+
+    const tasks = db.listTasksByEpic(database, projectId, epicId);
+    const active = tasks.filter((t) => t.status === "pending" || t.status === "running");
+    if (active.length === 0) {
+      res.status(409).json({ error: "no active tasks to stop" });
+      return;
+    }
+
+    // Kill worker if it's running a task from this epic
+    for (const task of active) {
+      if (task.status === "running") {
+        engineLoop.stopTask(projectId, task.id);
+      }
+    }
+
+    let stoppedCount = 0;
+    for (const task of active) {
+      db.updateTaskStatus(database, projectId, task.id, "failed", "stopped by user");
+      stoppedCount++;
+    }
+
+    db.updateEpicStatus(database, projectId, epicId, "failed");
+    res.json({ status: "stopped", stoppedCount, epicId });
+  });
+
+  // --- Execution ---
+
+  // Run project (priority boost for pending tasks)
   router.post("/:id/run", (req: Request, res: Response) => {
     const project = pm.getProject(paramId(req));
     if (!project) {
@@ -117,20 +514,23 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
       return;
     }
 
-    if (project.status === "running" || project.status === "converting") {
-      res.status(409).json({ error: "project is already running" });
+    // Boost priority of this project's pending tasks to be picked up next
+    const tasks = db.listTasks(database, project.id);
+    const pending = tasks.filter((t) => t.status === "pending");
+    if (pending.length === 0) {
+      res.status(409).json({ error: "no pending tasks to run" });
       return;
     }
 
-    try {
-      const result = queue.enqueue(project.id, project.tech);
-      res.json({ status: result, projectId: project.id });
-    } catch (err: any) {
-      res.status(409).json({ error: err.message });
+    // Set all pending tasks to priority 0 (highest)
+    for (const task of pending) {
+      database.prepare("UPDATE tasks SET priority = 0 WHERE project_id = ? AND id = ?").run(project.id, task.id);
     }
+
+    res.json({ status: "boosted", projectId: project.id, pendingCount: pending.length });
   });
 
-  // Stop execution
+  // Stop project
   router.post("/:id/stop", (req: Request, res: Response) => {
     const project = pm.getProject(paramId(req));
     if (!project) {
@@ -138,18 +538,13 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
       return;
     }
 
-    const stopped = queue.stop(project.id);
-    if (!stopped) {
-      res.status(409).json({ error: "project is not running or queued" });
-      return;
-    }
-
+    engineLoop.stopProject(project.id);
     res.json({ status: "stopping", projectId: project.id });
   });
 
-  // Get queue status
+  // Queue/engine status
   router.get("/_queue", (_req: Request, res: Response) => {
-    res.json(queue.getStatus());
+    res.json(engineLoop.getStatus());
   });
 
   // SSE event stream
@@ -158,11 +553,6 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
     const project = pm.getProject(projectId);
     if (!project) {
       res.status(404).json({ error: "project not found" });
-      return;
-    }
-
-    if (!eventBus) {
-      res.status(501).json({ error: "event streaming not available" });
       return;
     }
 
@@ -192,70 +582,6 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
     });
   });
 
-  // Add a task (story) to an existing project
-  router.post("/:id/tasks", (req: Request, res: Response) => {
-    const projectId = paramId(req);
-    const project = pm.getProject(projectId);
-    if (!project) {
-      res.status(404).json({ error: "project not found" });
-      return;
-    }
-
-    const prdPath = join(project.dir, ".gyro", "prd.json");
-    if (!existsSync(prdPath)) {
-      res.status(409).json({ error: "project has no prd.json yet — run the project first so the plan gets converted" });
-      return;
-    }
-
-    const { title, pipeline, acceptance_criteria, plan_ref } = req.body;
-
-    if (!title || typeof title !== "string") {
-      res.status(400).json({ error: "title is required" });
-      return;
-    }
-    if (!acceptance_criteria || !Array.isArray(acceptance_criteria) || acceptance_criteria.length === 0) {
-      res.status(400).json({ error: "acceptance_criteria is required (non-empty array)" });
-      return;
-    }
-
-    try {
-      const prd = new PrdFile(prdPath);
-
-      // Auto-generate id and priority
-      const maxPriority = prd.stories.reduce((max, s) => Math.max(max, s.priority), 0);
-      const storyNum = prd.stories.length + 1;
-      const id = `story-${String(storyNum).padStart(2, "0")}`;
-
-      // Avoid id collision
-      let finalId = id;
-      let counter = storyNum;
-      while (prd.getStory(finalId)) {
-        counter++;
-        finalId = `story-${String(counter).padStart(2, "0")}`;
-      }
-
-      const story: Story = {
-        id: finalId,
-        title,
-        pipeline: pipeline || "setup",
-        acceptance_criteria,
-        passes: false,
-        priority: maxPriority + 1,
-      };
-      if (plan_ref) story.plan_ref = plan_ref;
-
-      prd.data.stories.push(story);
-      prd.save();
-
-      // Update project progress
-      pm.refreshProgress(projectId);
-
-      res.status(201).json(story);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // Execution status snapshot
   router.get("/:id/status", (req: Request, res: Response) => {
     const projectId = paramId(req);
@@ -265,19 +591,17 @@ export function createProjectRouter(pm: ProjectManager, queue: ExecutionQueue, e
       return;
     }
 
-    const liveStatus = eventBus?.getStatus(projectId);
+    const liveStatus = eventBus.getStatus(projectId);
     if (liveStatus) {
       res.json(liveStatus);
       return;
     }
 
-    // Fallback to ProjectManager data
     const progress = pm.refreshProgress(projectId);
     res.json({
       projectId,
-      running: project.status === "running" || project.status === "converting",
+      running: project.status === "running",
       progress: progress ?? project.progress,
-      storyId: progress?.currentStory ?? project.currentStory,
     });
   });
 

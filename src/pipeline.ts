@@ -1,7 +1,10 @@
 import { execSync } from "child_process";
 import { readFileSync, existsSync } from "fs";
 import type { AgentType, TokenUsage, OnEvent } from "./types.js";
-import { PrdFile } from "./prd.js";
+import type { PrdFile } from "./prd.js";
+import type { DbTaskSource } from "./db-task-source.js";
+
+type TaskSource = PrdFile | DbTaskSource;
 import { State } from "./state.js";
 import { resolveModel, buildCommand } from "./agents/resolve.js";
 import { runPostStepGate } from "./gates.js";
@@ -78,7 +81,7 @@ function showStepUsage(stepName: string, usage: TokenUsage) {
 
 export function runStep(
   stepName: string,
-  prd: PrdFile,
+  prd: TaskSource,
   state: State,
   defaultAgent: AgentType,
   tracker: ProgressTracker
@@ -155,7 +158,7 @@ export interface PipelineResult {
 
 export function runStoryPipeline(
   storyId: string,
-  prd: PrdFile,
+  prd: TaskSource,
   state: State,
   defaultAgent: AgentType,
   tracker: ProgressTracker,

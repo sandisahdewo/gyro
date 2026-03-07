@@ -1,7 +1,10 @@
 import { appendFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
 import type { AgentType, EnvConfig, OnEvent } from "./types.js";
-import { PrdFile } from "./prd.js";
+import type { PrdFile } from "./prd.js";
+import type { DbTaskSource } from "./db-task-source.js";
+
+export type TaskSource = PrdFile | DbTaskSource;
 import { State } from "./state.js";
 import { ProgressTracker } from "./progress.js";
 import { runStep, runStoryPipeline } from "./pipeline.js";
@@ -17,7 +20,7 @@ function envUp(env: EnvConfig) {
   } catch {
     fail("Failed to start environment");
     fail(`Command: ${env.up}`);
-    process.exit(1);
+    throw new Error(`Failed to start environment: ${env.up}`);
   }
 }
 
@@ -37,9 +40,10 @@ export interface EngineConfig {
   defaultAgent: AgentType;
   prdPath: string;
   progressFile: string;
+  singleTask?: string;
 }
 
-export function dryRun(prd: PrdFile, config: EngineConfig, tracker: ProgressTracker) {
+export function dryRun(prd: TaskSource, config: EngineConfig, tracker: ProgressTracker) {
   console.log(`\n${BOLD}Gyro Loop -- Execution Plan${NC}\n`);
   console.log(`  ${CYAN}Default agent: ${config.defaultAgent}${NC}`);
 
@@ -131,7 +135,7 @@ export function dryRun(prd: PrdFile, config: EngineConfig, tracker: ProgressTrac
 }
 
 export function runPlanMode(
-  prd: PrdFile,
+  prd: TaskSource,
   state: State,
   config: EngineConfig,
   tracker: ProgressTracker
@@ -141,7 +145,7 @@ export function runPlanMode(
   ok("Planning complete. Review PLAN.md, then run: npx tsx src/convert.ts PLAN.md");
 }
 
-export function resumeFrom(storyId: string, prd: PrdFile) {
+export function resumeFrom(storyId: string, prd: TaskSource) {
   log(`Resuming from ${storyId} -- marking prior stories as passed`);
   for (const story of prd.sortedStories()) {
     if (story.id === storyId) break;
@@ -196,7 +200,7 @@ export function initGitIfNeeded() {
   }
 }
 
-export function runEngine(prd: PrdFile, state: State, config: EngineConfig, onEvent?: OnEvent) {
+export function runEngine(prd: TaskSource, state: State, config: EngineConfig, onEvent?: OnEvent) {
   const tracker = new ProgressTracker();
 
   // Banner
@@ -218,7 +222,8 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig, onEv
 
   // Main loop
   while (true) {
-    const story = prd.getNextStory();
+    const story = config.singleTask ? prd.getStory(config.singleTask) : prd.getNextStory();
+    if (config.singleTask && story?.passes) break; // single task already done
 
     if (!story) {
       hr();
@@ -333,6 +338,9 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig, onEv
           }
         }
       }
+
+      // In single-task mode, exit after shipping
+      if (config.singleTask) return;
     } else {
       const totalElapsed = Math.floor((Date.now() - startTime) / 1000);
       fail(`${story.id} FAILED after ${config.maxRetries} attempts (${formatDuration(storyElapsed)})`);
@@ -354,7 +362,7 @@ export function runEngine(prd: PrdFile, state: State, config: EngineConfig, onEv
 
       fail(`Stopping. Fix the issue and run: npx tsx src/index.ts --from ${story.id}`);
       fail(`Total time: ${formatDuration(totalElapsed)}`);
-      process.exit(1);
+      throw new Error(`Story ${story.id} failed after ${config.maxRetries} attempts`);
     }
   }
 }
