@@ -1,6 +1,5 @@
 {
   "project": "notes-app",
-  "work_branches": true,
   "env": {
     "up": "docker compose up -d --wait",
     "down": "docker compose down"
@@ -25,6 +24,14 @@
     "simplify":     ["simplify", "review"]
   },
   "checkpoints": {
+    "branch": {
+      "cmd": "git checkout -b epic/${EPIC_ID} || git checkout epic/${EPIC_ID}",
+      "before": true
+    },
+    "commit": {
+      "cmd": "git add -A && git commit -m 'feat(${TASK_ID}): task complete' --allow-empty",
+      "after": "each"
+    },
     "test-all": {
       "cmd": "npm test && npx playwright test",
       "after": "each",

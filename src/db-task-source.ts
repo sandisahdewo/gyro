@@ -51,7 +51,6 @@ export class DbTaskSource {
       models: config.models ?? undefined,
       checkpoints: config.checkpoints ?? undefined,
       env: config.env ?? undefined,
-      work_branches: config.work_branches ? true : undefined,
       stories: tasks.map((t) => this.taskToStory(t)),
     };
   }
@@ -190,6 +189,12 @@ export class DbTaskSource {
     return cp.after.includes(storyId);
   }
 
+  getBeforeCheckpoints(): string[] {
+    return this.getCheckpointNames().filter(
+      (name) => !!this.checkpoints[name]?.before
+    );
+  }
+
   getOnCompleteCheckpoints(): string[] {
     return this.getCheckpointNames().filter(
       (name) => !!this.checkpoints[name]?.on_complete
@@ -210,9 +215,4 @@ export class DbTaskSource {
     return !!this.ensureConfig().env;
   }
 
-  // --- Work branches ---
-
-  useWorkBranches(): boolean {
-    return !!this.ensureConfig().work_branches;
-  }
 }

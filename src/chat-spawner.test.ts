@@ -27,7 +27,7 @@ describe("buildSystemPrompt", () => {
     const config: DbProjectConfig = {
       project_id: "p1",
       pipelines: { setup: { steps: ["work"] } as any, "backend-tdd": { steps: ["test", "work"] } as any },
-      models: null, checkpoints: null, env: null, work_branches: 0,
+      models: null, checkpoints: null, env: null,
     };
     const prompt = buildSystemPrompt(project, epic, config);
     expect(prompt).toContain("setup, backend-tdd");

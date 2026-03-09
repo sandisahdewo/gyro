@@ -21,6 +21,7 @@ export interface PipelineObject {
 export type PipelineConfig = string[] | PipelineObject;
 
 export interface Checkpoint {
+  before?: boolean;
   after?: string[] | "each";
   on_complete?: boolean;
   standalone?: boolean;
@@ -44,7 +45,6 @@ export interface EnvConfig {
 
 export interface PRD {
   project: string;
-  work_branches?: boolean;
   env?: EnvConfig;
   models?: Record<string, string>;
   pipelines: Record<string, PipelineConfig>;

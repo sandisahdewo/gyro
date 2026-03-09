@@ -26,7 +26,6 @@ export interface DbProjectConfig {
   models: Record<string, string> | null;
   checkpoints: Record<string, Checkpoint> | null;
   env: EnvConfig | null;
-  work_branches: number;
 }
 
 export interface DbEpic {
@@ -218,17 +217,16 @@ export function updateProject(db: Database.Database, id: string, updates: Partia
 
 // --- Project Config ---
 
-export function setProjectConfig(db: Database.Database, projectId: string, config: TemplateConfig, env?: EnvConfig, workBranches?: boolean): void {
+export function setProjectConfig(db: Database.Database, projectId: string, config: TemplateConfig, env?: EnvConfig): void {
   db.prepare(
-    `INSERT OR REPLACE INTO project_config (project_id, pipelines, models, checkpoints, env, work_branches)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT OR REPLACE INTO project_config (project_id, pipelines, models, checkpoints, env)
+     VALUES (?, ?, ?, ?, ?)`
   ).run(
     projectId,
     JSON.stringify(config.pipelines),
     JSON.stringify(config.models),
     JSON.stringify(config.checkpoints),
-    env ? JSON.stringify(env) : null,
-    workBranches ? 1 : 0
+    env ? JSON.stringify(env) : null
   );
 }
 
@@ -241,7 +239,6 @@ export function getProjectConfig(db: Database.Database, projectId: string): DbPr
     models: row.models ? JSON.parse(row.models) : null,
     checkpoints: row.checkpoints ? JSON.parse(row.checkpoints) : null,
     env: row.env ? JSON.parse(row.env) : null,
-    work_branches: row.work_branches,
   };
 }
 

@@ -30,6 +30,8 @@ const NODE_TDD: TemplateConfig = {
     simplify: "claude:sonnet",
   },
   checkpoints: {
+    branch: { cmd: "git checkout -b epic/${EPIC_ID} || git checkout epic/${EPIC_ID}", before: true },
+    commit: { cmd: "git add -A && git commit -m 'feat(${TASK_ID}): task complete' --allow-empty", after: "each" },
     "test-all": { cmd: "npm test", after: "each", on_complete: true },
     "type-check": { cmd: "npx tsc --noEmit", after: "each", on_complete: true },
     build: { cmd: "npm run build", after: "each", on_complete: true },
@@ -62,6 +64,8 @@ const GO_TDD: TemplateConfig = {
     simplify: "claude:sonnet",
   },
   checkpoints: {
+    branch: { cmd: "git checkout -b epic/${EPIC_ID} || git checkout epic/${EPIC_ID}", before: true },
+    commit: { cmd: "git add -A && git commit -m 'feat(${TASK_ID}): task complete' --allow-empty", after: "each" },
     "test-all": { cmd: "go test ./...", after: "each", on_complete: true },
     "type-check": { cmd: "go vet ./...", after: "each", on_complete: true },
     build: { cmd: "go build ./...", after: "each", on_complete: true },
@@ -94,6 +98,8 @@ const PYTHON_TDD: TemplateConfig = {
     simplify: "claude:sonnet",
   },
   checkpoints: {
+    branch: { cmd: "git checkout -b epic/${EPIC_ID} || git checkout epic/${EPIC_ID}", before: true },
+    commit: { cmd: "git add -A && git commit -m 'feat(${TASK_ID}): task complete' --allow-empty", after: "each" },
     "test-all": { cmd: "pytest", after: "each", on_complete: true },
     lint: { after: "each", on_complete: true, standalone: true },
     simplify: { on_complete: true },
@@ -121,6 +127,8 @@ const FRONTEND: TemplateConfig = {
     simplify: "claude:sonnet",
   },
   checkpoints: {
+    branch: { cmd: "git checkout -b epic/${EPIC_ID} || git checkout epic/${EPIC_ID}", before: true },
+    commit: { cmd: "git add -A && git commit -m 'feat(${TASK_ID}): task complete' --allow-empty", after: "each" },
     "test-all": { cmd: "npx playwright test", after: "each", on_complete: true },
     lint: { after: "each", on_complete: true, standalone: true },
     simplify: { on_complete: true },

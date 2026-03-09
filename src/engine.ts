@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
 import type { AgentType, EnvConfig, OnEvent } from "./types.js";
+import type { CheckpointContext } from "./checkpoint.js";
 import type { PrdFile } from "./prd.js";
 import type { DbTaskSource } from "./db-task-source.js";
 
@@ -41,15 +42,12 @@ export interface EngineConfig {
   prdPath: string;
   progressFile: string;
   singleTask?: string;
+  checkpointContext?: CheckpointContext;
 }
 
 export function dryRun(prd: TaskSource, config: EngineConfig, tracker: ProgressTracker) {
   console.log(`\n${BOLD}Gyro Loop -- Execution Plan${NC}\n`);
   console.log(`  ${CYAN}Default agent: ${config.defaultAgent}${NC}`);
-
-  if (prd.useWorkBranches()) {
-    console.log(`  ${CYAN}Work branches: enabled${NC} (base: ${config.baseBranch})`);
-  }
 
   if (prd.hasEnv()) {
     const env = prd.getEnv()!;
@@ -83,8 +81,6 @@ export function dryRun(prd: TaskSource, config: EngineConfig, tracker: ProgressT
     const steps = prd.getPipelineSteps(story.pipeline);
     const testLock = prd.getTestLock(story.pipeline);
     const e2e = prd.getE2e(story.pipeline);
-    const branchStr = prd.useWorkBranches() ? ` ${DIM}-> gyro/${story.id}${NC}` : "";
-
     // Build step display with gates inline
     const stepParts: string[] = [];
     for (const step of steps) {
@@ -105,7 +101,7 @@ export function dryRun(prd: TaskSource, config: EngineConfig, tracker: ProgressT
       }
     }
 
-    console.log(`  ${status} ${BOLD}${story.id}${NC}: ${story.title}${branchStr}`);
+    console.log(`  ${status} ${BOLD}${story.id}${NC}: ${story.title}`);
     console.log(`    ${DIM}${stepParts.join(" -> ")}${NC}`);
 
     if (prd.hasCheckpoints()) {
@@ -220,6 +216,18 @@ export function runEngine(prd: TaskSource, state: State, config: EngineConfig, o
 
   const startTime = Date.now();
 
+  // Run before checkpoints (once, before first task)
+  if (prd.hasCheckpoints()) {
+    for (const cpName of prd.getBeforeCheckpoints()) {
+      try {
+        runCheckpoint(cpName, prd, state, config.defaultAgent, tracker,
+          config.maxRetries, config.progressFile, onEvent, config.checkpointContext);
+      } catch (err) {
+        warn(`Before checkpoint ${cpName} crashed: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+  }
+
   // Main loop
   while (true) {
     const story = config.singleTask ? prd.getStory(config.singleTask) : prd.getNextStory();
@@ -231,7 +239,7 @@ export function runEngine(prd: TaskSource, state: State, config: EngineConfig, o
       // Run on_complete checkpoints
       for (const cpName of prd.getOnCompleteCheckpoints()) {
         try {
-          runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile, onEvent);
+          runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile, onEvent, config.checkpointContext);
         } catch (err) {
           warn(`Checkpoint ${cpName} crashed: ${err instanceof Error ? err.message : err}`);
         }
@@ -292,20 +300,6 @@ export function runEngine(prd: TaskSource, state: State, config: EngineConfig, o
     const storyElapsed = Math.floor((Date.now() - storyStart) / 1000);
 
     if (result.shipped) {
-      // Commit
-      try {
-        if (prd.useWorkBranches()) {
-          git.createStoryBranch(story.id);
-        }
-        const summary = state.getWorkSummary()?.split("\n")[0] ?? "";
-        git.gitAdd();
-        git.gitCommit(`feat(${story.id}): ${summary || "implementation complete"}`);
-        log(`  Committed on ${git.currentBranch()}`);
-      } catch (err) {
-        warn(`Git commit failed: ${err instanceof Error ? err.message : err}`);
-        warn("Continuing anyway...");
-      }
-
       ok(`${story.id} SHIPPED on attempt ${result.attempt} (${formatDuration(storyElapsed)})`);
       tracker.showStoryUsage();
       prd.markStoryPassed(story.id);
@@ -327,10 +321,11 @@ export function runEngine(prd: TaskSource, state: State, config: EngineConfig, o
 
       // Run checkpoints after this story
       if (prd.hasCheckpoints()) {
+        const storyCtx = { ...config.checkpointContext, taskId: story.id };
         for (const cpName of prd.getCheckpointNames()) {
           if (prd.shouldRunCheckpointAfter(story.id, cpName)) {
             try {
-              runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile, onEvent);
+              runCheckpoint(cpName, prd, state, config.defaultAgent, tracker, config.maxRetries, config.progressFile, onEvent, storyCtx);
             } catch (err) {
               warn(`Checkpoint ${cpName} crashed: ${err instanceof Error ? err.message : err}`);
               warn("Continuing to next story...");

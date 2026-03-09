@@ -136,7 +136,6 @@ export function createProjectRouter(pm: ProjectManager, engineLoop: EngineLoop, 
       models: config.models,
       checkpoints: config.checkpoints,
       env: config.env,
-      work_branches: !!config.work_branches,
     });
   });
 
@@ -154,7 +153,7 @@ export function createProjectRouter(pm: ProjectManager, engineLoop: EngineLoop, 
       return;
     }
 
-    const { pipelines, models, checkpoints, env, work_branches } = req.body;
+    const { pipelines, models, checkpoints, env } = req.body;
 
     const merged = {
       pipelines: pipelines ?? existing.pipelines,
@@ -168,7 +167,6 @@ export function createProjectRouter(pm: ProjectManager, engineLoop: EngineLoop, 
       projectId,
       merged,
       env !== undefined ? env : existing.env ?? undefined,
-      work_branches !== undefined ? !!work_branches : !!existing.work_branches,
     );
 
     const updated = db.getProjectConfig(database, projectId)!;
@@ -178,7 +176,6 @@ export function createProjectRouter(pm: ProjectManager, engineLoop: EngineLoop, 
       models: updated.models,
       checkpoints: updated.checkpoints,
       env: updated.env,
-      work_branches: !!updated.work_branches,
     });
   });
 

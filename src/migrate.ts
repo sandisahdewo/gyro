@@ -63,7 +63,7 @@ export function importPrdToDb(database: Database.Database, projectId: string, pr
     checkpoints: prd.checkpoints ?? {},
     default_pipeline: Object.keys(prd.pipelines)[0] ?? "setup",
   };
-  db.setProjectConfig(database, projectId, templateConfig, prd.env, prd.work_branches);
+  db.setProjectConfig(database, projectId, templateConfig, prd.env);
 
   // Import stories as tasks
   for (const story of prd.stories) {

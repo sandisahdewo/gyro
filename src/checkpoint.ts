@@ -11,6 +11,19 @@ import { runStep } from "./pipeline.js";
 import * as git from "./git.js";
 import { log, ok, warn, fail, hr, BOLD, DIM, CYAN, NC } from "./log.js";
 
+export interface CheckpointContext {
+  epicId?: string;
+  taskId?: string;
+  projectId?: string;
+}
+
+function substituteVars(cmd: string, ctx: CheckpointContext): string {
+  return cmd
+    .replace(/\$\{EPIC_ID\}/g, ctx.epicId ?? "")
+    .replace(/\$\{TASK_ID\}/g, ctx.taskId ?? "")
+    .replace(/\$\{PROJECT_ID\}/g, ctx.projectId ?? "");
+}
+
 export function runCheckpoint(
   checkpointName: string,
   prd: TaskSource,
@@ -19,7 +32,8 @@ export function runCheckpoint(
   tracker: ProgressTracker,
   maxRetries: number,
   progressFile: string,
-  onEvent?: OnEvent
+  onEvent?: OnEvent,
+  ctx?: CheckpointContext
 ) {
   const checkpoint = prd.checkpoints[checkpointName];
 
@@ -30,7 +44,8 @@ export function runCheckpoint(
 
   // Command checkpoint — run the command, auto-fix if it fails
   if (checkpoint?.cmd) {
-    runCommandCheckpoint(checkpointName, checkpoint.cmd, prd, state, defaultAgent, tracker, maxRetries, progressFile, onEvent);
+    const resolvedCmd = ctx ? substituteVars(checkpoint.cmd, ctx) : checkpoint.cmd;
+    runCommandCheckpoint(checkpointName, resolvedCmd, prd, state, defaultAgent, tracker, maxRetries, progressFile, onEvent);
     return;
   }
 

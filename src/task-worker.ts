@@ -62,6 +62,12 @@ async function run() {
 
   const defaultAgent = resolveDefaultAgent(process.env.GYRO_DEFAULT_AGENT ?? "auto");
 
+  const checkpointContext = {
+    epicId: task.epic_id ?? undefined,
+    taskId: taskId,
+    projectId: projectId,
+  };
+
   process.chdir(cwd);
 
   initGitIfNeeded();
@@ -72,6 +78,7 @@ async function run() {
     prdPath: join(cwd, ".gyro", "prd.json"),
     progressFile,
     singleTask: taskId,
+    checkpointContext,
   }, (event: Record<string, unknown>) => sendEvent(event));
 
   database.close();

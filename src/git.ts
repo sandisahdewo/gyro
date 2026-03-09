@@ -71,16 +71,6 @@ export function branchExists(name: string): boolean {
   }
 }
 
-export function createStoryBranch(storyId: string): string {
-  const branch = `gyro/${storyId}`;
-  if (branchExists(branch)) {
-    checkoutBranch(branch);
-  } else {
-    checkoutBranch(branch, true);
-  }
-  return branch;
-}
-
 // --- Tags ---
 
 export function getLatestCheckpointTag(checkpointName: string): string | undefined {

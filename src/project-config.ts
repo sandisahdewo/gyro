@@ -7,7 +7,6 @@ export interface ProjectConfigData {
   models?: Record<string, string>;
   checkpoints?: Record<string, Checkpoint>;
   env?: EnvConfig;
-  work_branches?: boolean;
 }
 
 export class ProjectConfig {
@@ -30,7 +29,6 @@ export class ProjectConfig {
       models: prd.data.models,
       checkpoints: prd.data.checkpoints,
       env: prd.data.env,
-      work_branches: prd.data.work_branches,
     });
   }
 
@@ -99,6 +97,12 @@ export class ProjectConfig {
     return cp.after.includes(storyId);
   }
 
+  getBeforeCheckpoints(): string[] {
+    return this.getCheckpointNames().filter(
+      (name) => !!this.checkpoints[name]?.before
+    );
+  }
+
   getOnCompleteCheckpoints(): string[] {
     return this.getCheckpointNames().filter(
       (name) => !!this.checkpoints[name]?.on_complete
@@ -119,9 +123,4 @@ export class ProjectConfig {
     return !!this.data.env;
   }
 
-  // --- Work branches ---
-
-  useWorkBranches(): boolean {
-    return !!this.data.work_branches;
-  }
 }

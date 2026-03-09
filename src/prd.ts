@@ -144,6 +144,12 @@ export class PrdFile {
     return cp.after.includes(storyId);
   }
 
+  getBeforeCheckpoints(): string[] {
+    return this.getCheckpointNames().filter(
+      (name) => !!this.checkpoints[name]?.before
+    );
+  }
+
   getOnCompleteCheckpoints(): string[] {
     return this.getCheckpointNames().filter(
       (name) => !!this.checkpoints[name]?.on_complete
@@ -164,9 +170,4 @@ export class PrdFile {
     return !!this.data.env;
   }
 
-  // --- Work branches ---
-
-  useWorkBranches(): boolean {
-    return !!this.data.work_branches;
-  }
 }
