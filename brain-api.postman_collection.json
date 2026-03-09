@@ -16,6 +16,10 @@
     {
       "key": "epicId",
       "value": "epic-01"
+    },
+    {
+      "key": "sessionId",
+      "value": ""
     }
   ],
   "item": [
@@ -296,6 +300,105 @@
             "method": "GET",
             "url": "{{baseUrl}}/projects/{{projectId}}/events",
             "description": "Server-Sent Events stream. In Postman, use 'Send and Download' or test via curl: curl -N {{baseUrl}}/projects/{{projectId}}/events"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat",
+      "item": [
+        {
+          "name": "Send Chat Message (new session)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"How should we implement this epic?\"\n}"
+            },
+            "description": "Send a message without sessionId to create a new chat session. Returns sessionId and messageId. Stream the response via the SSE endpoint."
+          }
+        },
+        {
+          "name": "Send Chat Message (continue session)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What about error handling?\",\n  \"sessionId\": \"{{sessionId}}\"\n}"
+            },
+            "description": "Send a message with sessionId to continue an existing session. Works for both active and finished sessions (finished sessions are reactivated)."
+          }
+        },
+        {
+          "name": "List Chat Sessions",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat/sessions",
+            "description": "List all chat sessions for this epic, including message counts and active status."
+          }
+        },
+        {
+          "name": "Chat Stream (SSE)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat/stream",
+            "description": "Server-Sent Events stream for the current chat response. Optionally pass ?sessionId= to target a specific session. Use curl for SSE: curl -N {{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat/stream"
+          }
+        },
+        {
+          "name": "Session History",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat/sessions/{{sessionId}}/history",
+            "description": "Get the full conversation history for a specific chat session."
+          }
+        },
+        {
+          "name": "Chat History (latest)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat/history",
+            "description": "Get the conversation history for the most recent chat session on this epic."
+          }
+        },
+        {
+          "name": "Delete Chat Session",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat/sessions/{{sessionId}}",
+            "description": "Permanently delete a chat session and all its messages. Cannot delete while a response is in progress."
+          }
+        },
+        {
+          "name": "Finish Chat",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat/finish",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sessionId\": \"{{sessionId}}\"\n}"
+            },
+            "description": "End a chat session. Pass sessionId to finish a specific session, or omit to finish the most recent active session. Aborts any in-flight response."
           }
         }
       ]

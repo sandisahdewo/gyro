@@ -65,6 +65,25 @@ export interface DbEvent {
   created_at: string;
 }
 
+export type ChatSessionStatus = "active" | "finished";
+
+export interface DbChatSession {
+  id: string;
+  project_id: string;
+  epic_id: string;
+  status: ChatSessionStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbChatMessage {
+  id: number;
+  session_id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -127,6 +146,25 @@ CREATE TABLE IF NOT EXISTS events (
   type TEXT NOT NULL,
   payload TEXT NOT NULL,
   created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  epic_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
 );
 `;
 
@@ -351,4 +389,65 @@ export function logEvent(db: Database.Database, event: { project_id: string; tas
     `INSERT INTO events (project_id, task_id, epic_id, type, payload, created_at)
      VALUES (?, ?, ?, ?, ?, ?)`
   ).run(event.project_id, event.task_id ?? null, event.epic_id ?? null, event.type, JSON.stringify(event.payload), now);
+}
+
+// --- Chat Sessions ---
+
+export function createChatSession(db: Database.Database, id: string, projectId: string, epicId: string): DbChatSession {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO chat_sessions (id, project_id, epic_id, status, created_at, updated_at)
+     VALUES (?, ?, ?, 'active', ?, ?)`
+  ).run(id, projectId, epicId, now, now);
+  return db.prepare("SELECT * FROM chat_sessions WHERE id = ?").get(id) as DbChatSession;
+}
+
+export function getChatSession(db: Database.Database, sessionId: string): DbChatSession | undefined {
+  return db.prepare("SELECT * FROM chat_sessions WHERE id = ?").get(sessionId) as DbChatSession | undefined;
+}
+
+export function listChatSessionsByEpic(db: Database.Database, projectId: string, epicId: string): DbChatSession[] {
+  return db.prepare(
+    "SELECT * FROM chat_sessions WHERE project_id = ? AND epic_id = ? ORDER BY created_at DESC"
+  ).all(projectId, epicId) as DbChatSession[];
+}
+
+export function getChatSessionByEpic(db: Database.Database, projectId: string, epicId: string): DbChatSession | undefined {
+  return db.prepare(
+    "SELECT * FROM chat_sessions WHERE project_id = ? AND epic_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1"
+  ).get(projectId, epicId) as DbChatSession | undefined;
+}
+
+export function getLatestChatSessionByEpic(db: Database.Database, projectId: string, epicId: string): DbChatSession | undefined {
+  return db.prepare(
+    "SELECT * FROM chat_sessions WHERE project_id = ? AND epic_id = ? ORDER BY created_at DESC LIMIT 1"
+  ).get(projectId, epicId) as DbChatSession | undefined;
+}
+
+export function finishChatSession(db: Database.Database, sessionId: string): void {
+  const now = new Date().toISOString();
+  db.prepare("UPDATE chat_sessions SET status = 'finished', updated_at = ? WHERE id = ?").run(now, sessionId);
+}
+
+export function reactivateChatSession(db: Database.Database, sessionId: string): void {
+  const now = new Date().toISOString();
+  db.prepare("UPDATE chat_sessions SET status = 'active', updated_at = ? WHERE id = ?").run(now, sessionId);
+}
+
+export function deleteChatSession(db: Database.Database, sessionId: string): void {
+  db.prepare("DELETE FROM chat_messages WHERE session_id = ?").run(sessionId);
+  db.prepare("DELETE FROM chat_sessions WHERE id = ?").run(sessionId);
+}
+
+export function addChatMessage(db: Database.Database, sessionId: string, role: "user" | "assistant", content: string): DbChatMessage {
+  const now = new Date().toISOString();
+  const result = db.prepare(
+    `INSERT INTO chat_messages (session_id, role, content, created_at)
+     VALUES (?, ?, ?, ?)`
+  ).run(sessionId, role, content, now);
+  return db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(result.lastInsertRowid) as DbChatMessage;
+}
+
+export function listChatMessages(db: Database.Database, sessionId: string): DbChatMessage[] {
+  return db.prepare("SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC").all(sessionId) as DbChatMessage[];
 }

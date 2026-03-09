@@ -6,6 +6,8 @@ import { ProjectManager } from "./project-manager.js";
 import { EngineLoop } from "./engine-loop.js";
 import { EventBus } from "./event-bus.js";
 import { createProjectRouter } from "./api/projects.js";
+import { createChatRouter } from "./api/chat.js";
+import { ChatSpawner } from "./chat-spawner.js";
 import { migrateFromJson } from "./migrate.js";
 
 const PORT = parseInt(process.env.PORT ?? "7440", 10);
@@ -25,7 +27,9 @@ const engineLoop = new EngineLoop(db, eventBus);
 migrateFromJson(db, PROJECTS_DIR);
 
 // --- Routes ---
+const chatSpawner = new ChatSpawner();
 app.use("/projects", createProjectRouter(pm, engineLoop, eventBus, db));
+app.use("/projects", createChatRouter(pm, chatSpawner, db));
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", engine: engineLoop.getStatus() });
@@ -60,6 +64,13 @@ app.listen(PORT, () => {
   console.log(`  GET    /projects/:id/events                   SSE event stream`);
   console.log(`  GET    /projects/:id/status                   Execution status`);
   console.log(`  GET    /projects/_queue                       Engine status`);
+  console.log(`  POST   /projects/:id/epics/:epicId/chat                     Send chat message`);
+  console.log(`  GET    /projects/:id/epics/:epicId/chat/sessions            List chat sessions`);
+  console.log(`  GET    /projects/:id/epics/:epicId/chat/stream              SSE chat stream`);
+  console.log(`  GET    /projects/:id/epics/:epicId/chat/sessions/:sid/history Session history`);
+  console.log(`  GET    /projects/:id/epics/:epicId/chat/history             Chat history (latest)`);
+  console.log(`  DELETE /projects/:id/epics/:epicId/chat/sessions/:sid       Delete session`);
+  console.log(`  POST   /projects/:id/epics/:epicId/chat/finish              Finish chat`);
   console.log(`  GET    /health                                Health check`);
   console.log("");
   console.log("Engine auto-polling for pending tasks...");
