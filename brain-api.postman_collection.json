@@ -336,7 +336,7 @@
       "name": "Chat",
       "item": [
         {
-          "name": "Send Chat Message (new session)",
+          "name": "Send Chat Message (new session, Claude)",
           "request": {
             "method": "POST",
             "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat",
@@ -350,7 +350,43 @@
               "mode": "raw",
               "raw": "{\n  \"message\": \"How should we implement this epic?\"\n}"
             },
-            "description": "Send a message without sessionId to create a new chat session. Returns sessionId and messageId. Stream the response via the SSE endpoint."
+            "description": "Start a new chat session with Claude (opus 4.6, default). Omit 'model' to use Claude. Returns sessionId, messageId, and model. Stream the response via the SSE endpoint."
+          }
+        },
+        {
+          "name": "Send Chat Message (new session, Codex)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"How should we implement this epic?\",\n  \"model\": \"codex\"\n}"
+            },
+            "description": "Start a new chat session with Codex using the repo default `gpt-5.3-codex`. Set model to `codex`. Allowed values are `claude`, `codex`, and `gpt-5.4`. Returns sessionId, messageId, and model."
+          }
+        },
+        {
+          "name": "Send Chat Message (new session, GPT-5.4)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"How should we implement this epic?\",\n  \"model\": \"gpt-5.4\"\n}"
+            },
+            "description": "Start a new chat session with `gpt-5.4` via the Codex CLI. Use model `gpt-5.4` when you want the non-codex GPT-5.4 option. Returns sessionId, messageId, and model."
           }
         },
         {
@@ -368,7 +404,7 @@
               "mode": "raw",
               "raw": "{\n  \"message\": \"What about error handling?\",\n  \"sessionId\": \"{{sessionId}}\"\n}"
             },
-            "description": "Send a message with sessionId to continue an existing session. Works for both active and finished sessions (finished sessions are reactivated)."
+            "description": "Continue an existing session. The model is locked to what was chosen when the session was created. Works for both active and finished sessions (finished sessions are reactivated)."
           }
         },
         {
@@ -376,7 +412,7 @@
           "request": {
             "method": "GET",
             "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/chat/sessions",
-            "description": "List all chat sessions for this epic, including message counts and active status."
+            "description": "List all chat sessions for this epic, including model (claude or codex), message counts, and active status."
           }
         },
         {

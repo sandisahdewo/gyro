@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { spawn, type ChildProcess } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import type { AgentType } from "./types.js";
 import type { DbProject, DbEpic, DbProjectConfig } from "./db.js";
 
 export interface ChatSpawnerEvents {
@@ -19,6 +20,31 @@ export interface SessionResult {
   code: number | null;
   error?: string;
   chunks: string[];
+  agent: AgentType;
+  externalSessionId?: string;
+}
+
+export interface ChatModel {
+  agent: AgentType;
+  model: string;
+  label: string;
+}
+
+const CHAT_MODELS: Record<string, ChatModel> = {
+  claude: { agent: "claude", model: "claude-opus-4-6", label: "claude" },
+  codex:  { agent: "codex",  model: "gpt-5.3-codex",   label: "codex" },
+  "gpt-5.4": { agent: "codex", model: "gpt-5.4", label: "gpt-5.4" },
+};
+
+/** Parse a model string for planning chat sessions. */
+export function parseChatModel(modelStr: string | undefined): ChatModel {
+  const key = modelStr ?? "claude";
+  const found = CHAT_MODELS[key];
+  if (!found) {
+    const allowed = Object.keys(CHAT_MODELS).join(", ");
+    throw new Error(`Invalid chat model: "${modelStr}". Allowed: ${allowed}`);
+  }
+  return found;
 }
 
 export function buildSystemPrompt(project: DbProject, epic: DbEpic, config: DbProjectConfig | undefined): string {
@@ -60,6 +86,84 @@ export function buildSystemPrompt(project: DbProject, epic: DbEpic, config: DbPr
   return lines.join("\n");
 }
 
+function buildClaudeArgs(sessionId: string, isResume: boolean, systemPrompt: string | undefined, model: string): string[] {
+  const args = [
+    "-p",
+    "--verbose",
+    "--output-format", "stream-json",
+    "--max-turns", "1",
+    "--permission-mode", "plan",
+    "--allowedTools", "Read,Glob,Grep,WebSearch,WebFetch",
+    "--setting-sources", "user,local",
+  ];
+
+  if (model) {
+    args.push("--model", model);
+  }
+
+  if (isResume) {
+    args.push("--resume", sessionId);
+  } else {
+    args.push("--session-id", sessionId);
+  }
+
+  if (systemPrompt && !isResume) {
+    args.push("--append-system-prompt", systemPrompt);
+  }
+
+  return args;
+}
+
+function parseJsonLine(line: string): Record<string, unknown> | undefined {
+  try {
+    return JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractChunkError(chunks: string[]): string | undefined {
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    const parsed = parseJsonLine(chunks[i]);
+    if (parsed?.type === "error" && typeof parsed.message === "string") {
+      return parsed.message;
+    }
+  }
+  return undefined;
+}
+
+function buildCodexArgs(sessionId: string | undefined, isResume: boolean, _systemPrompt: string | undefined, model: string): string[] {
+  if (isResume) {
+    if (!sessionId) {
+      throw new Error("Codex resume requires an external session id");
+    }
+    // codex exec resume <sessionId> <prompt> -- prompt is written to stdin
+    const args = [
+      "exec", "resume", sessionId,
+      "-",  // read prompt from stdin
+      "--json",
+      "-s", "read-only",
+    ];
+    if (model) {
+      args.push("-m", model);
+    }
+    return args;
+  }
+
+  const args = [
+    "exec",
+    "-",  // read prompt from stdin
+    "--json",
+    "-s", "read-only",
+  ];
+
+  if (model) {
+    args.push("-m", model);
+  }
+
+  return args;
+}
+
 export class ChatSpawner extends EventEmitter {
   private active = new Map<string, ActiveProcess>();
   private results = new Map<string, SessionResult>();
@@ -88,6 +192,9 @@ export class ChatSpawner extends EventEmitter {
     isResume: boolean;
     systemPrompt?: string;
     projectDir?: string;
+    agent?: AgentType;
+    model?: string;
+    resumeSessionId?: string;
   }): void {
     if (this.active.has(sessionId)) {
       throw new Error("Session already has an in-flight message");
@@ -96,29 +203,21 @@ export class ChatSpawner extends EventEmitter {
     // Clear any previous result for this session
     this.results.delete(sessionId);
 
-    const args = [
-      "-p",
-      "--verbose",
-      "--output-format", "stream-json",
-      "--max-turns", "1",
-      "--permission-mode", "plan",
-      "--allowedTools", "Read,Glob,Grep,WebSearch,WebFetch",
-      "--setting-sources", "user,local",
-    ];
+    const agent = opts.agent ?? "claude";
+    const model = opts.model ?? "";
 
-    if (opts.isResume) {
-      // Resume existing session by ID
-      args.push("--resume", sessionId);
+    let command: string;
+    let args: string[];
+
+    if (agent === "codex") {
+      command = "codex";
+      args = buildCodexArgs(opts.resumeSessionId, opts.isResume, opts.systemPrompt, model);
     } else {
-      // New session with specific ID
-      args.push("--session-id", sessionId);
+      command = "claude";
+      args = buildClaudeArgs(opts.resumeSessionId ?? sessionId, opts.isResume, opts.systemPrompt, model);
     }
 
-    if (opts.systemPrompt && !opts.isResume) {
-      args.push("--append-system-prompt", opts.systemPrompt);
-    }
-
-    const proc = spawn("claude", args, {
+    const proc = spawn(command, args, {
       cwd: opts.projectDir,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -126,16 +225,39 @@ export class ChatSpawner extends EventEmitter {
     this.active.set(sessionId, { proc, sessionId });
 
     let stderrBuf = "";
+    let stdoutBuf = "";
     const chunks: string[] = [];
+    let externalSessionId = agent === "claude" ? sessionId : undefined;
+
+    const pushChunk = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      chunks.push(trimmed);
+      if (agent === "codex") {
+        const parsed = parseJsonLine(trimmed);
+        if (parsed?.type === "thread.started" && typeof parsed.thread_id === "string") {
+          externalSessionId = parsed.thread_id;
+        }
+      }
+      this.emit("chunk", sessionId, trimmed);
+    };
+
+    const flushStdout = () => {
+      const trimmed = stdoutBuf.trim();
+      if (trimmed) {
+        pushChunk(trimmed);
+      }
+      stdoutBuf = "";
+    };
 
     proc.stdout!.on("data", (data: Buffer) => {
-      const text = data.toString();
-      for (const line of text.split("\n")) {
-        const trimmed = line.trim();
-        if (trimmed) {
-          chunks.push(trimmed);
-          this.emit("chunk", sessionId, trimmed);
-        }
+      stdoutBuf += data.toString();
+      let newlineIdx = stdoutBuf.indexOf("\n");
+      while (newlineIdx >= 0) {
+        const line = stdoutBuf.slice(0, newlineIdx);
+        stdoutBuf = stdoutBuf.slice(newlineIdx + 1);
+        pushChunk(line);
+        newlineIdx = stdoutBuf.indexOf("\n");
       }
     });
 
@@ -144,28 +266,41 @@ export class ChatSpawner extends EventEmitter {
     });
 
     proc.on("close", (code) => {
-      this.active.delete(sessionId);
-      const result: SessionResult = { code, chunks };
-      if (code !== 0 && stderrBuf) {
-        result.error = stderrBuf.trim();
-        this.emit("spawn_error", sessionId, new Error(`claude exited ${code}: ${stderrBuf.trim()}`));
+      flushStdout();
+      if (this.active.get(sessionId)?.proc === proc) {
+        this.active.delete(sessionId);
+      }
+      const result: SessionResult = { code, chunks, agent, externalSessionId };
+      if (code !== 0) {
+        result.error = stderrBuf.trim() || extractChunkError(chunks);
+      }
+      if (result.error) {
+        this.emit("spawn_error", sessionId, new Error(`${agent} exited ${code}: ${result.error}`));
       }
       this.results.set(sessionId, result);
       this.emit("done", sessionId, code);
     });
 
     proc.on("error", (err) => {
-      this.active.delete(sessionId);
-      this.results.set(sessionId, { code: null, error: err.message, chunks });
+      if (this.active.get(sessionId)?.proc === proc) {
+        this.active.delete(sessionId);
+      }
+      this.results.set(sessionId, { code: null, error: err.message, chunks, agent, externalSessionId });
       this.emit("spawn_error", sessionId, err);
       this.emit("done", sessionId, null);
     });
 
-    // Write the user message to stdin with a directory scope reminder
-    const scopedMessage = opts.projectDir
-      ? `[Project: ${opts.projectDir} — only access files within this directory, use relative paths only]\n\n${message}`
-      : message;
-    proc.stdin!.write(scopedMessage);
+    // Build the message to send via stdin
+    let stdinMessage = message;
+    if (opts.projectDir) {
+      stdinMessage = `[Project: ${opts.projectDir} — only access files within this directory, use relative paths only]\n\n${message}`;
+    }
+    // For codex new sessions, prepend system prompt since codex doesn't have --append-system-prompt
+    if (agent === "codex" && opts.systemPrompt && !opts.isResume) {
+      stdinMessage = `${opts.systemPrompt}\n\n---\n\n${stdinMessage}`;
+    }
+
+    proc.stdin!.write(stdinMessage);
     proc.stdin!.end();
   }
 
@@ -173,7 +308,6 @@ export class ChatSpawner extends EventEmitter {
     const entry = this.active.get(sessionId);
     if (!entry) return false;
     entry.proc.kill("SIGTERM");
-    this.active.delete(sessionId);
     return true;
   }
 }

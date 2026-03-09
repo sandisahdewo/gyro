@@ -71,6 +71,8 @@ export interface DbChatSession {
   id: string;
   project_id: string;
   epic_id: string;
+  model: string;
+  external_session_id: string | null;
   status: ChatSessionStatus;
   created_at: string;
   updated_at: string;
@@ -153,6 +155,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
   epic_id TEXT NOT NULL,
+  model TEXT NOT NULL DEFAULT 'claude',
+  external_session_id TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -172,6 +176,10 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 const MIGRATIONS = [
   // Add plan column to epics table
   `ALTER TABLE epics ADD COLUMN plan TEXT`,
+  // Add model column to chat_sessions table
+  `ALTER TABLE chat_sessions ADD COLUMN model TEXT NOT NULL DEFAULT 'claude'`,
+  // Persist the provider-side session/thread id for multi-turn resumes
+  `ALTER TABLE chat_sessions ADD COLUMN external_session_id TEXT`,
 ];
 
 function runMigrations(db: Database.Database): void {
@@ -425,12 +433,12 @@ export function logEvent(db: Database.Database, event: { project_id: string; tas
 
 // --- Chat Sessions ---
 
-export function createChatSession(db: Database.Database, id: string, projectId: string, epicId: string): DbChatSession {
+export function createChatSession(db: Database.Database, id: string, projectId: string, epicId: string, model: string = "claude"): DbChatSession {
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT INTO chat_sessions (id, project_id, epic_id, status, created_at, updated_at)
-     VALUES (?, ?, ?, 'active', ?, ?)`
-  ).run(id, projectId, epicId, now, now);
+    `INSERT INTO chat_sessions (id, project_id, epic_id, model, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'active', ?, ?)`
+  ).run(id, projectId, epicId, model, now, now);
   return db.prepare("SELECT * FROM chat_sessions WHERE id = ?").get(id) as DbChatSession;
 }
 
@@ -464,6 +472,11 @@ export function finishChatSession(db: Database.Database, sessionId: string): voi
 export function reactivateChatSession(db: Database.Database, sessionId: string): void {
   const now = new Date().toISOString();
   db.prepare("UPDATE chat_sessions SET status = 'active', updated_at = ? WHERE id = ?").run(now, sessionId);
+}
+
+export function updateChatSessionExternalId(db: Database.Database, sessionId: string, externalSessionId: string): void {
+  const now = new Date().toISOString();
+  db.prepare("UPDATE chat_sessions SET external_session_id = ?, updated_at = ? WHERE id = ?").run(externalSessionId, now, sessionId);
 }
 
 export function deleteChatSession(db: Database.Database, sessionId: string): void {

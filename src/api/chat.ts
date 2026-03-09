@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
 import type Database from "better-sqlite3";
 import type { ProjectManager } from "../project-manager.js";
-import { ChatSpawner, buildSystemPrompt } from "../chat-spawner.js";
+import { ChatSpawner, buildSystemPrompt, parseChatModel } from "../chat-spawner.js";
 import * as db from "../db.js";
 
 function paramId(req: Request): string {
@@ -20,34 +20,63 @@ function paramSessionId(req: Request): string {
   return Array.isArray(id) ? id[0] : id;
 }
 
+function parseJsonLine(line: string): Record<string, unknown> | undefined {
+  try {
+    return JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractCodexAgentText(value: unknown): string {
+  if (typeof value !== "string") return "";
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed.final === "string") {
+      return parsed.final;
+    }
+  } catch {
+    // use plain string
+  }
+  return value;
+}
+
 function extractResponseText(chunks: string[]): string {
   // The stream-json format ends with a "result" event containing the full response
   // This is the most reliable source — it includes the complete final text
   for (let i = chunks.length - 1; i >= 0; i--) {
-    try {
-      const parsed = JSON.parse(chunks[i]);
-      if (parsed.type === "result" && typeof parsed.result === "string") {
-        return parsed.result;
+    const parsed = parseJsonLine(chunks[i]);
+    if (!parsed) continue;
+    if (parsed.type === "result" && typeof parsed.result === "string") {
+      return parsed.result;
+    }
+    if (
+      parsed.type === "item.completed" &&
+      typeof parsed.item === "object" &&
+      parsed.item !== null &&
+      (parsed.item as Record<string, unknown>).type === "agent_message"
+    ) {
+      const text = extractCodexAgentText((parsed.item as Record<string, unknown>).text);
+      if (text) {
+        return text;
       }
-    } catch {
-      // skip
     }
   }
 
   // Fallback: build from assistant message content blocks
   let text = "";
   for (const line of chunks) {
-    try {
-      const parsed = JSON.parse(line);
-      if (parsed.type === "assistant" && parsed.message?.content) {
-        for (const block of parsed.message.content) {
-          if (block.type === "text") {
-            text = block.text;
-          }
+    const parsed = parseJsonLine(line);
+    if (!parsed) continue;
+    const message = typeof parsed.message === "object" && parsed.message !== null
+      ? parsed.message as { content?: Array<{ type?: string; text?: string }> }
+      : undefined;
+    if (parsed.type === "assistant" && Array.isArray(message?.content)) {
+      for (const block of message.content) {
+        if (block.type === "text") {
+          text = block.text ?? "";
         }
       }
-    } catch {
-      // skip
     }
   }
   return text;
@@ -79,6 +108,33 @@ function parseAssistantContent(content: string): { result: string; events: unkno
   return { result: content, events: [] };
 }
 
+function extractExternalSessionId(events: unknown[]): string | undefined {
+  for (const event of events) {
+    if (
+      event &&
+      typeof event === "object" &&
+      (event as Record<string, unknown>).type === "thread.started" &&
+      typeof (event as Record<string, unknown>).thread_id === "string"
+    ) {
+      return (event as Record<string, unknown>).thread_id as string;
+    }
+  }
+  return undefined;
+}
+
+function recoverCodexSessionId(database: Database.Database, sessionId: string): string | undefined {
+  const messages = db.listChatMessages(database, sessionId);
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== "assistant") continue;
+    const parsed = parseAssistantContent(messages[i].content);
+    const externalId = extractExternalSessionId(parsed.events);
+    if (externalId) {
+      return externalId;
+    }
+  }
+  return undefined;
+}
+
 function formatMessages(messages: db.DbChatMessage[]): unknown[] {
   return messages.map((msg) => {
     if (msg.role === "assistant") {
@@ -99,13 +155,16 @@ function formatMessages(messages: db.DbChatMessage[]): unknown[] {
 export function createChatRouter(pm: ProjectManager, chatSpawner: ChatSpawner, database: Database.Database): Router {
   const router = Router();
 
-  // Auto-save assistant response when Claude finishes, regardless of SSE connection
+  // Auto-save assistant response when the CLI finishes, regardless of SSE connection
   chatSpawner.on("done", (sessionId: string, _code: number | null) => {
     const result = chatSpawner.getResult(sessionId);
     if (!result) return;
     const fullText = extractResponseText(result.chunks);
     if (!fullText && result.chunks.length === 0) return;
     try {
+      if (result.externalSessionId) {
+        db.updateChatSessionExternalId(database, sessionId, result.externalSessionId);
+      }
       const content = buildAssistantContent(fullText, result.chunks);
       db.addChatMessage(database, sessionId, "assistant", content);
     } catch {
@@ -139,7 +198,7 @@ export function createChatRouter(pm: ProjectManager, chatSpawner: ChatSpawner, d
       return;
     }
 
-    const { message, sessionId: requestedSessionId } = req.body;
+    const { message, sessionId: requestedSessionId, model: modelStr } = req.body;
     if (!message || typeof message !== "string") {
       res.status(400).json({ error: "message is required" });
       return;
@@ -157,6 +216,8 @@ export function createChatRouter(pm: ProjectManager, chatSpawner: ChatSpawner, d
 
     let session: db.DbChatSession;
     let isResume: boolean;
+    let chatModel: ReturnType<typeof parseChatModel>;
+    let resumeSessionId: string | undefined;
 
     if (requestedSessionId) {
       // Continue existing session
@@ -175,10 +236,32 @@ export function createChatRouter(pm: ProjectManager, chatSpawner: ChatSpawner, d
       }
       session = db.getChatSession(database, requestedSessionId)!;
       isResume = true;
+      // Use the session's stored model (ignore any model override on resume)
+      chatModel = parseChatModel(session.model);
+      if (chatModel.agent === "codex") {
+        resumeSessionId = session.external_session_id ?? recoverCodexSessionId(database, session.id);
+        if (!resumeSessionId) {
+          res.status(409).json({ error: "codex session cannot be resumed because its provider thread id is missing" });
+          return;
+        }
+        if (!session.external_session_id) {
+          db.updateChatSessionExternalId(database, session.id, resumeSessionId);
+          session = db.getChatSession(database, requestedSessionId)!;
+        }
+      } else {
+        resumeSessionId = session.id;
+      }
     } else {
-      // Create new session
+      // Parse and validate model before creating session
+      try {
+        chatModel = parseChatModel(modelStr);
+      } catch (err: any) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
+      // Create new session with model
       const newId = randomUUID();
-      session = db.createChatSession(database, newId, projectId, epicId);
+      session = db.createChatSession(database, newId, projectId, epicId, chatModel.label);
       isResume = false;
     }
 
@@ -190,19 +273,22 @@ export function createChatRouter(pm: ProjectManager, chatSpawner: ChatSpawner, d
     const dbProject = db.getProject(database, projectId)!;
     const systemPrompt = buildSystemPrompt(dbProject, epic, config);
 
-    // Spawn Claude CLI
+    // Spawn AI CLI
     try {
       chatSpawner.send(session.id, message, {
         isResume,
         systemPrompt,
         projectDir: dbProject.dir,
+        agent: chatModel.agent,
+        model: chatModel.model,
+        resumeSessionId,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
       return;
     }
 
-    res.status(201).json({ sessionId: session.id, messageId: userMsg.id });
+    res.status(201).json({ sessionId: session.id, messageId: userMsg.id, model: chatModel.label });
   });
 
   // List sessions for an epic
@@ -219,7 +305,7 @@ export function createChatRouter(pm: ProjectManager, chatSpawner: ChatSpawner, d
     const sessions = db.listChatSessionsByEpic(database, projectId, epicId);
     const result = sessions.map((s) => {
       const messageCount = db.listChatMessages(database, s.id).length;
-      return { ...s, messageCount, isActive: chatSpawner.isActive(s.id) };
+      return { ...s, model: s.model, messageCount, isActive: chatSpawner.isActive(s.id) };
     });
 
     res.json({ sessions: result });

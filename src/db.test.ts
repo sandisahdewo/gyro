@@ -9,7 +9,7 @@ import {
   checkEpicCompletion, getTaskProgress, getEpicProgress,
   logEvent,
   createChatSession, getChatSession, getChatSessionByEpic, getLatestChatSessionByEpic,
-  listChatSessionsByEpic, finishChatSession, reactivateChatSession, deleteChatSession,
+  listChatSessionsByEpic, finishChatSession, reactivateChatSession, updateChatSessionExternalId, deleteChatSession,
   addChatMessage, listChatMessages,
 } from "./db.js";
 import type { TemplateConfig } from "./templates.js";
@@ -226,6 +226,7 @@ describe("db", () => {
       expect(session.id).toBe("sess-1");
       expect(session.project_id).toBe("p1");
       expect(session.epic_id).toBe("epic-01");
+      expect(session.external_session_id).toBeNull();
       expect(session.status).toBe("active");
 
       const found = getChatSessionByEpic(db, "p1", "epic-01");
@@ -296,6 +297,14 @@ describe("db", () => {
 
       reactivateChatSession(db, "sess-1");
       expect(getChatSession(db, "sess-1")!.status).toBe("active");
+    });
+
+    it("updateChatSessionExternalId persists the provider session id", () => {
+      createChatSession(db, "sess-1", "p1", "epic-01");
+
+      updateChatSessionExternalId(db, "sess-1", "thread-123");
+
+      expect(getChatSession(db, "sess-1")!.external_session_id).toBe("thread-123");
     });
 
     it("deleteChatSession removes session and its messages", () => {
