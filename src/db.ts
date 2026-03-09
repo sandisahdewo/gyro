@@ -33,6 +33,7 @@ export interface DbEpic {
   project_id: string;
   title: string;
   description: string;
+  plan: string | null;
   status: EpicStatus;
   created_at: string;
   updated_at: string;
@@ -111,6 +112,7 @@ CREATE TABLE IF NOT EXISTS epics (
   project_id TEXT NOT NULL,
   title TEXT NOT NULL,
   description TEXT NOT NULL,
+  plan TEXT,
   status TEXT NOT NULL DEFAULT 'backlog',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -167,12 +169,29 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 `;
 
+const MIGRATIONS = [
+  // Add plan column to epics table
+  `ALTER TABLE epics ADD COLUMN plan TEXT`,
+];
+
+function runMigrations(db: Database.Database): void {
+  for (const migration of MIGRATIONS) {
+    try {
+      db.exec(migration);
+    } catch (err: any) {
+      // Ignore "duplicate column" errors (migration already applied)
+      if (!err.message.includes("duplicate column")) throw err;
+    }
+  }
+}
+
 export function openDb(dbPath: string = "data/brain.db"): Database.Database {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  runMigrations(db);
   return db;
 }
 
@@ -265,6 +284,19 @@ export function listEpics(db: Database.Database, projectId: string): DbEpic[] {
   return db.prepare("SELECT * FROM epics WHERE project_id = ? ORDER BY created_at").all(projectId) as DbEpic[];
 }
 
+export function updateEpic(db: Database.Database, projectId: string, epicId: string, updates: Partial<Pick<DbEpic, "title" | "description" | "plan" | "status">>): void {
+  const now = new Date().toISOString();
+  const sets: string[] = ["updated_at = ?"];
+  const values: unknown[] = [now];
+
+  for (const [key, val] of Object.entries(updates)) {
+    sets.push(`${key} = ?`);
+    values.push(val ?? null);
+  }
+  values.push(projectId, epicId);
+  db.prepare(`UPDATE epics SET ${sets.join(", ")} WHERE project_id = ? AND id = ?`).run(...values);
+}
+
 export function updateEpicStatus(db: Database.Database, projectId: string, epicId: string, status: EpicStatus): void {
   const now = new Date().toISOString();
   db.prepare("UPDATE epics SET status = ?, updated_at = ? WHERE project_id = ? AND id = ?").run(status, now, projectId, epicId);
@@ -307,7 +339,10 @@ export function listTasksByEpic(db: Database.Database, projectId: string, epicId
 
 export function getNextPendingTask(db: Database.Database): DbTask | undefined {
   const row = db.prepare(
-    `SELECT * FROM tasks WHERE status = 'pending' ORDER BY priority ASC LIMIT 1`
+    `SELECT t.* FROM tasks t
+     JOIN epics e ON t.epic_id = e.id AND t.project_id = e.project_id
+     WHERE t.status = 'pending' AND e.status = 'implementing'
+     ORDER BY t.priority ASC LIMIT 1`
   ).get() as any;
   if (!row) return undefined;
   return { ...row, acceptance_criteria: JSON.parse(row.acceptance_criteria) };

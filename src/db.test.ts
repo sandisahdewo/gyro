@@ -115,11 +115,22 @@ describe("db", () => {
     });
 
     it("gets next pending task by priority", () => {
-      createTask(db, "p1", { id: "task-02", title: "Second", pipeline: "setup", acceptance_criteria: ["ok"], priority: 2 });
-      createTask(db, "p1", { id: "task-01", title: "First", pipeline: "setup", acceptance_criteria: ["ok"], priority: 1 });
+      const epic = createEpic(db, "p1", "Test Epic", "desc");
+      updateEpicStatus(db, "p1", epic.id, "implementing");
+      createTask(db, "p1", { id: "task-02", title: "Second", pipeline: "setup", acceptance_criteria: ["ok"], priority: 2, epic_id: epic.id });
+      createTask(db, "p1", { id: "task-01", title: "First", pipeline: "setup", acceptance_criteria: ["ok"], priority: 1, epic_id: epic.id });
 
       const next = getNextPendingTask(db)!;
       expect(next.id).toBe("task-01");
+    });
+
+    it("ignores pending tasks from non-implementing epics", () => {
+      const epic = createEpic(db, "p1", "Test Epic", "desc");
+      updateEpicStatus(db, "p1", epic.id, "ready");
+      createTask(db, "p1", { id: "task-01", title: "First", pipeline: "setup", acceptance_criteria: ["ok"], priority: 1, epic_id: epic.id });
+
+      const next = getNextPendingTask(db);
+      expect(next).toBeUndefined();
     });
 
     it("marks tasks shipped and failed", () => {

@@ -235,25 +235,27 @@ export function createProjectRouter(pm: ProjectManager, engineLoop: EngineLoop, 
       return;
     }
 
-    const { title, description, status } = req.body;
-    const now = new Date().toISOString();
+    const { title, description, plan, status } = req.body;
+    const updates: Partial<Pick<db.DbEpic, "title" | "description" | "plan" | "status">> = {};
 
-    const sets: string[] = ["updated_at = ?"];
-    const values: unknown[] = [now];
+    if (title !== undefined) updates.title = title;
+    if (description !== undefined) updates.description = description;
+    if (plan !== undefined) updates.plan = plan;
+    if (status !== undefined) updates.status = status;
 
-    if (title) { sets.push("title = ?"); values.push(title); }
-    if (description) { sets.push("description = ?"); values.push(description); }
-    if (status) { sets.push("status = ?"); values.push(status); }
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: "no fields to update" });
+      return;
+    }
 
-    values.push(projectId, epicId);
-    database.prepare(`UPDATE epics SET ${sets.join(", ")} WHERE project_id = ? AND id = ?`).run(...values);
+    db.updateEpic(database, projectId, epicId, updates);
 
     const updated = db.getEpic(database, projectId, epicId);
     res.json(updated);
   });
 
-  // Implement epic (decompose + create tasks)
-  router.post("/:id/epics/:epicId/implement", (req: Request, res: Response) => {
+  // Draft plan from chat sessions (AI-assisted merge)
+  router.post("/:id/epics/:epicId/draft-plan", async (req: Request, res: Response) => {
     const projectId = paramId(req);
     const epicId = paramEpicId(req);
 
@@ -269,6 +271,84 @@ export function createProjectRouter(pm: ProjectManager, engineLoop: EngineLoop, 
       return;
     }
 
+    // Get sessions to include (optional filter, defaults to all)
+    const { session_ids } = req.body;
+    let sessions = db.listChatSessionsByEpic(database, projectId, epicId);
+    if (Array.isArray(session_ids) && session_ids.length > 0) {
+      const idSet = new Set(session_ids);
+      sessions = sessions.filter((s) => idSet.has(s.id));
+    }
+
+    if (sessions.length === 0) {
+      res.status(400).json({ error: "no chat sessions found for this epic" });
+      return;
+    }
+
+    // Build conversation summary for each session
+    const sessionSummaries = sessions.map((s) => {
+      const messages = db.listChatMessages(database, s.id);
+      const convo = messages.map((m) => `${m.role}: ${m.content}`).join("\n\n");
+      return `### Session ${s.id} (${s.status})\n${convo}`;
+    }).join("\n\n---\n\n");
+
+    const prompt = `You are a technical planner. Given the chat sessions below about an epic, synthesize a clear, concise implementation plan.
+
+## Epic
+**Title:** ${epic.title}
+**Description:** ${epic.description}
+
+## Chat Sessions
+${sessionSummaries}
+
+## Instructions
+- Extract the key decisions, architecture choices, and agreed approach from ALL sessions
+- Resolve any contradictions (prefer the most recent session)
+- Output a clear implementation plan with:
+  - **Approach:** High-level technical approach
+  - **Key Decisions:** Important choices made during planning
+  - **Requirements:** What needs to be built (bullet points)
+  - **Constraints:** Any limitations or rules agreed upon
+- Be concise — this plan will be fed to a task decomposer
+- Output ONLY the plan text, no preamble`;
+
+    try {
+      const { execSync } = await import("child_process");
+      const result = execSync("claude -p --model haiku --max-turns 1", {
+        input: prompt,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+        maxBuffer: 10 * 1024 * 1024,
+      });
+
+      res.json({ plan: result.trim() });
+    } catch (err: any) {
+      res.status(500).json({ error: `Failed to draft plan: ${err.message}` });
+    }
+  });
+
+  // Approve plan → decompose into tasks (epic → ready, tasks visible but not executed)
+  // User moves epic to "implementing" to start execution
+  router.post("/:id/epics/:epicId/approve", (req: Request, res: Response) => {
+    const projectId = paramId(req);
+    const epicId = paramEpicId(req);
+
+    const project = pm.getProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: "project not found" });
+      return;
+    }
+
+    const epic = db.getEpic(database, projectId, epicId);
+    if (!epic) {
+      res.status(404).json({ error: "epic not found" });
+      return;
+    }
+
+    if (!epic.plan) {
+      res.status(400).json({ error: "epic has no plan — save a plan first before approving" });
+      return;
+    }
+
     const config = db.getProjectConfig(database, projectId);
     if (!config) {
       res.status(500).json({ error: "project has no config" });
@@ -276,9 +356,9 @@ export function createProjectRouter(pm: ProjectManager, engineLoop: EngineLoop, 
     }
 
     try {
-      // Decompose epic into tasks
+      // Decompose plan into tasks
       db.updateEpicStatus(database, projectId, epicId, "planning");
-      const decomposed = decompose(epic.title, epic.description, config);
+      const decomposed = decompose(epic.title, epic.description, config, epic.plan);
 
       // Get existing task count for id generation
       const existingTasks = db.listTasks(database, projectId);
@@ -302,12 +382,12 @@ export function createProjectRouter(pm: ProjectManager, engineLoop: EngineLoop, 
         createdTasks.push(task);
       }
 
-      db.updateEpicStatus(database, projectId, epicId, "implementing");
+      db.updateEpicStatus(database, projectId, epicId, "ready");
 
       db.logEvent(database, {
         project_id: projectId,
         epic_id: epicId,
-        type: "epic_decomposed",
+        type: "epic_approved",
         payload: { taskCount: createdTasks.length },
       });
 
@@ -321,52 +401,27 @@ export function createProjectRouter(pm: ProjectManager, engineLoop: EngineLoop, 
     }
   });
 
-  // --- Tasks ---
-
-  // Add a task directly
-  router.post("/:id/tasks", (req: Request, res: Response) => {
+  // List tasks for a specific epic
+  router.get("/:id/epics/:epicId/tasks", (req: Request, res: Response) => {
     const projectId = paramId(req);
-    const project = pm.getProject(projectId);
-    if (!project) {
+    const epicId = paramEpicId(req);
+
+    if (!pm.getProject(projectId)) {
       res.status(404).json({ error: "project not found" });
       return;
     }
 
-    const { title, pipeline, acceptance_criteria, plan_ref, epic_id } = req.body;
-
-    if (!title || typeof title !== "string") {
-      res.status(400).json({ error: "title is required" });
-      return;
-    }
-    if (!acceptance_criteria || !Array.isArray(acceptance_criteria) || acceptance_criteria.length === 0) {
-      res.status(400).json({ error: "acceptance_criteria is required (non-empty array)" });
+    const epic = db.getEpic(database, projectId, epicId);
+    if (!epic) {
+      res.status(404).json({ error: "epic not found" });
       return;
     }
 
-    try {
-      const existingTasks = db.listTasks(database, projectId);
-      const maxPriority = existingTasks.reduce((max, t) => Math.max(max, t.priority), 0);
-      const maxNum = existingTasks.reduce((max, t) => {
-        const match = t.id.match(/(?:story|task)-(\d+)/);
-        return match ? Math.max(max, parseInt(match[1])) : max;
-      }, 0);
-
-      const taskId = `task-${String(maxNum + 1).padStart(2, "0")}`;
-      const task = db.createTask(database, projectId, {
-        id: taskId,
-        title,
-        pipeline: pipeline || "setup",
-        acceptance_criteria,
-        priority: maxPriority + 1,
-        epic_id,
-        plan_ref,
-      });
-
-      res.status(201).json(task);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+    const tasks = db.listTasksByEpic(database, projectId, epicId);
+    res.json({ tasks });
   });
+
+  // --- Tasks ---
 
   // List tasks
   router.get("/:id/tasks", (req: Request, res: Response) => {

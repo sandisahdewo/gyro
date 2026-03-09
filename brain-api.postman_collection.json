@@ -175,11 +175,73 @@
           }
         },
         {
-          "name": "Implement Epic (decompose + execute)",
+          "name": "Save Epic Plan",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"## Approach\\nUse Passport.js with JWT strategy.\\n\\n## Key Decisions\\n- bcrypt for password hashing\\n- Access + refresh token pattern\\n- OAuth via Passport strategies\\n\\n## Requirements\\n- POST /auth/signup with email validation\\n- POST /auth/login returns JWT pair\\n- GET /auth/me returns current user\\n- OAuth callbacks for Gmail and GitHub\\n\\n## Constraints\\n- No session storage, stateless JWT only\\n- Tokens expire in 15min (access) / 7d (refresh)\"\n}"
+            },
+            "description": "Save the curated final plan for this epic. This plan is fed to the decomposer when implementing. Typically written by the user after reviewing chat sessions."
+          }
+        },
+        {
+          "name": "Draft Plan from Sessions (AI)",
           "request": {
             "method": "POST",
-            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/implement",
-            "description": "AI decomposes the epic into executable tasks, auto-classifies pipelines, and inserts them into the DB. The engine auto-picks them up — no /run needed."
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/draft-plan",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"session_ids\": []\n}"
+            },
+            "description": "AI reads chat sessions and synthesizes a coherent plan draft. Pass session_ids to filter specific sessions, or send empty array / omit to use all sessions. Returns { plan: '...' } — user should review and save via PATCH."
+          }
+        },
+        {
+          "name": "Approve Plan (decompose into tasks)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/approve",
+            "description": "User approves the final plan. AI decomposes the plan into tasks. Epic moves to 'ready' — tasks are visible but not yet executed. Move epic to 'implementing' (PATCH status) to start execution."
+          }
+        },
+        {
+          "name": "List Epic Tasks",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}/tasks",
+            "description": "List all tasks for this epic. Use this to show decomposed tasks on the epic board after approval."
+          }
+        },
+        {
+          "name": "Move Epic to Implement",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/projects/{{projectId}}/epics/{{epicId}}",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"implementing\"\n}"
+            },
+            "description": "Move epic from 'ready' to 'implementing'. This tells the engine to start picking up the epic's pending tasks. Equivalent to dragging the card to the Implement column."
           }
         },
         {
@@ -204,44 +266,10 @@
       "name": "Tasks",
       "item": [
         {
-          "name": "List Tasks",
+          "name": "List All Tasks",
           "request": {
             "method": "GET",
             "url": "{{baseUrl}}/projects/{{projectId}}/tasks"
-          }
-        },
-        {
-          "name": "Add Task Directly",
-          "request": {
-            "method": "POST",
-            "url": "{{baseUrl}}/projects/{{projectId}}/tasks",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Add health check endpoint\",\n  \"pipeline\": \"backend-tdd\",\n  \"acceptance_criteria\": [\n    \"GET /health returns 200 with {status: 'ok'}\",\n    \"Response includes server uptime in seconds\"\n  ]\n}"
-            }
-          }
-        },
-        {
-          "name": "Add Task to Epic",
-          "request": {
-            "method": "POST",
-            "url": "{{baseUrl}}/projects/{{projectId}}/tasks",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Add password reset flow\",\n  \"pipeline\": \"backend-tdd\",\n  \"acceptance_criteria\": [\n    \"POST /auth/forgot-password sends reset email\",\n    \"POST /auth/reset-password with valid token changes password\"\n  ],\n  \"epic_id\": \"epic-01\"\n}"
-            }
           }
         },
         {

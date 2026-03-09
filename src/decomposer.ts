@@ -65,9 +65,14 @@ function extractJsonArray(text: string): DecomposedTask[] {
 export function decompose(
   epicTitle: string,
   epicDescription: string,
-  config: DbProjectConfig
+  config: DbProjectConfig,
+  plan?: string | null
 ): DecomposedTask[] {
   const availablePipelines = Object.keys(config.pipelines).join(", ");
+
+  const planSection = plan
+    ? `\n\n## Approved Plan\nThis is the curated plan approved by the user. Use it as the primary source for task decomposition:\n\n${plan}`
+    : "";
 
   const prompt = `${DECOMPOSITION_PROMPT}
 
@@ -79,7 +84,7 @@ ${availablePipelines}
 **Title:** ${epicTitle}
 
 **Description:**
-${epicDescription}`;
+${epicDescription}${planSection}`;
 
   let rawResult: string;
   try {

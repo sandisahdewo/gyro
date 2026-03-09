@@ -11,7 +11,7 @@ describe("buildSystemPrompt", () => {
 
   const epic: DbEpic = {
     id: "epic-01", project_id: "p1", title: "Auth system",
-    description: "Build OAuth login", status: "backlog",
+    description: "Build OAuth login", plan: null, status: "backlog",
     created_at: "", updated_at: "",
   };
 
